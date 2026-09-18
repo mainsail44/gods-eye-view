@@ -12,3 +12,10 @@ output/
 3d-models/
 pinokio/ENVIRONMENT
 pinokio/.installed
+
+# Provider credential files (OpenSky OAuth client JSON, etc.)
+*credentials*.json
+*credential*.json
+
+# OMC operational state
+.omc/

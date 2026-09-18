@@ -135,6 +135,27 @@ See [docs/PERFORMANCE.md](docs/PERFORMANCE.md).
 **macOS shortcut:** `./scripts/dev-fresh.sh` clears the Vite cache and pulls any
 configured keys straight from the Keychain. It starts keyless too.
 
+### Path 3 — Container (Podman or Docker)
+
+```bash
+git clone https://github.com/bilawalsidhu/gods-eye-view.git
+cd gods-eye-view
+cp .env.container.example .env     # fill in what you have — all keys optional
+podman compose up -d --build
+```
+
+Open **`http://localhost:4173`**. `podman compose down` stops it.
+
+The image carries no API keys: the server-side keys are read from `.env` at run
+time, and the two browser-side keys (Google / Cesium) are injected into the
+built assets by the entrypoint at startup, so the image is safe to push to a
+private registry. Rotating a key means editing `.env` and running
+`podman compose up -d --force-recreate` — no rebuild.
+
+Since the in-app **POWER UP** panel only runs on the dev server, container keys
+go in `.env`. Every sign-up link is listed at the bottom of
+[`.env.container.example`](.env.container.example).
+
 ### Then power it up — in the app, not in a file
 
 Keys are upgrades, not prerequisites. When you want one, click the **POWER UP**

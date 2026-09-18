@@ -296,6 +296,10 @@
   animation: logo-pulse 2s ease-in-out infinite;
 }
 
+.loader-logo.brand-wordmark {
+  width: 260px;
+}
+
 @keyframes logo-pulse {
   0%,
   100% {

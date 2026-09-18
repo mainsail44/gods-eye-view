@@ -1,0 +1,26 @@
+# God's Eye View — Podman configuration.
+#
+#   cp .env.container.example .env   # then fill in your keys
+#   podman compose up -d --build     # http://localhost:4173
+#   podman compose down
+#
+# No keys live in this file or in the image: every value below is read from
+# ./.env at run time (`.env` is gitignored and excluded from the build context),
+# so the built image is safe to push to a registry. Empty values are fine — a
+# blank key just leaves that data source turned off.
+
+services:
+  gods-eye-view:
+    image: localhost/gods-eye-view:latest
+    build:
+      context: .
+      dockerfile: Containerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      HOST: '0.0.0.0'
+      PORT: '4173'
+    ports:
+      - '4173:4173'
+    restart: unless-stopped

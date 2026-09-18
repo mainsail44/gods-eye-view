@@ -527,6 +527,11 @@ body:has(.data-toggle-row[data-layer-id='alpr-cameras'] .data-toggle-btn.active)
   filter: drop-shadow(0 0 12px rgba(0, 246, 255, 0.5));
 }
 
+/* The Mainsail wordmark is a wide lockup rather than a square mark. */
+#title-bar .title-logo.brand-wordmark {
+  width: 200px;
+}
+
 #title-bar .title-logo::before,
 #title-bar .title-logo::after {
   --radio-broadcast-opacity: 0.28;
@@ -595,10 +600,15 @@ body:has(.data-toggle-row[data-layer-id='alpr-cameras'] .data-toggle-btn.active)
   height: 100%;
 }
 
-#title-bar .title-accent,
-.loader-content .title-accent {
-  color: var(--accent);
-  font-weight: 300;
+.brand-wordmark {
+  aspect-ratio: 2395 / 447;
+  pointer-events: none;
+}
+
+.brand-wordmark > img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 #title-bar .subtitle {

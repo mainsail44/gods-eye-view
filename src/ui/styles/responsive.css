@@ -52,6 +52,10 @@
     width: 36px;
   }
 
+  #title-bar .title-logo.brand-wordmark {
+    width: 140px;
+  }
+
   #title-bar .frame-rate-readout {
     position: fixed;
     top: 52px;
