@@ -1,3 +1,4 @@
+import { intelUrl } from '../../../src/sources/intelEndpoint.js';
 import { enforceOptInRateLimit, openAiRateLimiter } from './rate-limit.js';
 import {
   resolveVoiceModel,
@@ -16,7 +17,10 @@ import { GEV_REALTIME_TOOLS } from './tools.js';
 
 function createRealtimeTokenHandler({
   annotationGuidance,
-  endpoint = 'https://api.openai.com/v1/realtime/client_secrets',
+  endpoint = intelUrl(
+    process.env.OPENAI_BASE_URL || 'https://api.openai.com',
+    '/v1/realtime/client_secrets',
+  ),
   fetchImpl = (...args) => fetch(...args),
   resolveApiKey = () => process.env.OPENAI_API_KEY,
   models = {},

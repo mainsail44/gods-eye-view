@@ -69,6 +69,7 @@
       "src/data/placeProviderPayloads.js",
       "src/data/routeSteps.js",
       "src/sources/httpBody.js",
+      "src/sources/intelEndpoint.js",
       "src/sources/rateLimit.js"
     ],
     "external": []
@@ -207,6 +208,7 @@
       "src/data/routeSteps.js",
       "src/sources/httpBody.js",
       "src/sources/overpass.js",
+      "src/sources/intelEndpoint.js",
       "src/sources/rateLimit.js"
     ],
     "external": []
@@ -226,6 +228,7 @@
       "server/providers/overpass/geometry.js",
       "server/providers/overpass/transport.js",
       "src/sources/httpBody.js",
+      "src/sources/intelEndpoint.js",
       "src/sources/rateLimit.js"
     ],
     "external": []
@@ -248,6 +251,7 @@
       "src/data/regionalModel.js",
       "src/nominatimGeocode.js",
       "src/sources/httpBody.js",
+      "src/sources/intelEndpoint.js",
       "src/sources/rateLimit.js"
     ],
     "external": []
@@ -271,6 +275,7 @@
       "src/voice/voiceCost.js",
       "src/voice/actionSchemas.js",
       "server/providers/openai/toolDescriptions.js",
+      "src/sources/intelEndpoint.js",
       "src/sources/rateLimit.js"
     ],
     "external": []
@@ -2552,6 +2557,7 @@
       "src/sources/transitHistory.js",
       "src/sources/transitService.js",
       "src/sources/transitHistoryStore.js",
+      "src/sources/intelEndpoint.js",
       "src/sources/rateLimit.js"
     ],
     "external": ["pbf"]
@@ -2681,6 +2687,7 @@
       "src/sources/transitHistory.js",
       "src/sources/transitService.js",
       "src/sources/transitHistoryStore.js",
+      "src/sources/intelEndpoint.js",
       "src/sources/rateLimit.js"
     ],
     "external": ["pbf"]

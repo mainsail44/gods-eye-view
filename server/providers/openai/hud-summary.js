@@ -1,7 +1,10 @@
+import { intelUrl } from '../../../src/sources/intelEndpoint.js';
 import { keylessHudSummaryResponse } from '../../../src/hudSummaryResponse.js';
 import { enforceOptInRateLimit, openAiRateLimiter } from './rate-limit.js';
 import { readRequestBody } from '../common/request.js';
 import { OPENAI_HUD_SUMMARY_MODEL_DEFAULT } from './constants.js';
+
+const OPENAI_BASE = process.env.OPENAI_BASE_URL || 'https://api.openai.com';
 
 function extractOpenAiResponseText(data) {
   if (typeof data?.output_text === 'string' && data.output_text.trim()) {
@@ -51,7 +54,7 @@ async function handleHudSummary(req, res) {
   try {
     const body = await readRequestBody(req, 64 * 1024);
     const context = JSON.parse(body || '{}');
-    const response = await fetch('https://api.openai.com/v1/responses', {
+    const response = await fetch(intelUrl(OPENAI_BASE, '/v1/responses'), {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
