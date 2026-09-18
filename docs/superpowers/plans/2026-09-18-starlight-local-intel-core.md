@@ -754,6 +754,13 @@ export function createIntelHandler({
 Run: `node --test src/sources/intelServer.test.mjs`
 Expected: PASS, 4 tests.
 
+**Bounds (added after review):** the handler caps the request body at 64 KB
+(65536 bytes, replying 413), the question at 2000 characters (replying 400),
+and the number of distinct scored terms in `retrieve()` at 50. Each limit is a
+named constant. Without them a 14 MB body parses and a 5000-term question
+blocks the event loop for seconds, stalling every concurrent request. The
+application proxy's own 500-character question cap sits well inside these.
+
 - [ ] **Step 5: Add the entrypoint**
 
 Create `services/intel/src/index.js`:
