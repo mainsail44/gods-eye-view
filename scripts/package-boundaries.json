@@ -276,6 +276,16 @@
     ],
     "external": []
   },
+  "sovereign-provider": {
+    "runtime": "node",
+    "exports": ["./server/providers/sovereign"],
+    "modules": [
+      "server/providers/sovereign.js",
+      "src/sources/intel.js",
+      "src/sources/intelEndpoint.js"
+    ],
+    "external": []
+  },
   "standalone-key-setup": {
     "runtime": "node",
     "exports": ["./server/standalone/key-setup"],

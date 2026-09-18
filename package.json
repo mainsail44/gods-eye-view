@@ -116,6 +116,9 @@
     "./server/providers/openai": {
       "node": "./server/providers/openai.js"
     },
+    "./server/providers/sovereign": {
+      "node": "./server/providers/sovereign.js"
+    },
     "./server/standalone/key-setup": {
       "node": "./server/standalone/key-setup.js"
     },
