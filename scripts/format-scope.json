@@ -680,6 +680,7 @@
   "src/sources/intelCorpus.test.mjs",
   "src/sources/intel.js",
   "src/sources/intel.test.mjs",
+  "src/sources/intelServer.test.mjs",
   "src/sources/overpass.js",
   "src/sources/nominatim.js",
   "server/providers/transit.js",

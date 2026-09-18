@@ -1,0 +1,23 @@
+# Starlight Local Intel - retrieval and inference service.
+#
+#   podman build -t starlight-intel -f services/intel/Containerfile .
+#   podman run --rm -p 8080:8080 -v ./corpus:/app/corpus:ro \
+#     -e INTEL_MODEL=<model> -e INTEL_RUNTIME_URL=<runtime> starlight-intel
+#
+# Build context is the repository root: the service shares
+# src/sources/intelEndpoint.js with the application.
+
+FROM docker.io/library/node:24-slim AS runtime
+WORKDIR /app
+
+COPY services/intel/src /app/services/intel/src
+COPY src/sources/intelEndpoint.js /app/src/sources/intelEndpoint.js
+
+ENV NODE_ENV=production \
+    PORT=8080 \
+    INTEL_CORPUS=/app/corpus/corpus.json
+
+EXPOSE 8080
+USER node
+
+CMD ["node", "/app/services/intel/src/index.js"]
