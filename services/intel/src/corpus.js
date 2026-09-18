@@ -25,17 +25,25 @@ const METRIC_HINTS = [
   'snr',
   'signal',
   'propagation',
-  'spot',
-  'average',
-  'trend',
+  'noise floor',
+  'dx spot',
+  'dx spots',
   'over time',
   'last hour',
   'last day',
-  'noise',
+  'average snr',
+  'average signal',
 ];
 
 /** Signals are aggregates, places are documents; the retriever needs to know which. */
 export function selectRetrievalMode(question) {
   const value = String(question ?? '').toLowerCase();
-  return METRIC_HINTS.some((hint) => value.includes(hint)) ? 'metric' : 'document';
+  const pattern = new RegExp(
+    '\\b(?:' +
+      METRIC_HINTS.map((hint) =>
+        hint.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+      ).join('|') +
+      ')\\b',
+  );
+  return pattern.test(value) ? 'metric' : 'document';
 }

@@ -46,3 +46,27 @@ test('place questions route to document retrieval', () => {
   );
   assert.equal(selectRetrievalMode(''), 'document');
 });
+
+test('bare substrings do not route to metric (reviewer examples)', () => {
+  assert.equal(
+    selectRetrievalMode('is there a good spot for lunch'),
+    'document',
+  );
+  assert.equal(selectRetrievalMode('what is the average rainfall'), 'document');
+  assert.equal(selectRetrievalMode('this is a trending topic'), 'document');
+});
+
+test('existing metric question patterns still work', () => {
+  assert.equal(
+    selectRetrievalMode('what is the average snr over europe'),
+    'metric',
+  );
+  assert.equal(
+    selectRetrievalMode('show propagation paths in the last hour'),
+    'metric',
+  );
+});
+
+test('hints as part of larger words do not trigger metric mode', () => {
+  assert.equal(selectRetrievalMode('spotless record'), 'document');
+});
