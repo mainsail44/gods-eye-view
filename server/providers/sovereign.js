@@ -5,17 +5,38 @@ import {
   buildIntelQueryBody,
 } from '../../src/sources/intel.js';
 
+// Matches the intel service's own request body cap (see server/providers
+// for the service's 413 threshold); kept in sync deliberately.
+const MAX_REQUEST_BODY_BYTES = 65536;
+const BODY_TOO_LARGE = Symbol('sovereign-body-too-large');
+
 const send = (res, status, payload) => {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify(payload));
 };
 
+// Bounds memory use as chunks arrive rather than buffering an oversized
+// body in full: this proxy runs inside the process that serves production
+// traffic, so an unbounded accumulation here is a shared-process risk.
 const readBody = (req) =>
   new Promise((resolve) => {
     const chunks = [];
-    req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    let total = 0;
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      const buf = Buffer.from(chunk);
+      total += buf.length;
+      if (total > MAX_REQUEST_BODY_BYTES) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(buf);
+    });
     req.on('end', () => {
+      if (tooLarge) return resolve(BODY_TOO_LARGE);
       try {
         resolve(
           chunks.length
@@ -59,6 +80,8 @@ export function createSovereignMiddleware({
         });
       } else {
         const body = await readBody(req);
+        if (body === BODY_TOO_LARGE)
+          return send(res, 413, { error: 'Request body too large' });
         let payload;
         try {
           payload = buildIntelQueryBody(body?.question, { limit: body?.limit });

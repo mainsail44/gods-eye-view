@@ -4,7 +4,7 @@ import { createSovereignMiddleware } from '../../server/providers/sovereign.js';
 
 const invoke = (
   middleware,
-  { method = 'GET', url = '/health', body = null } = {},
+  { method = 'GET', url = '/health', body = null, rawChunks = null } = {},
 ) =>
   new Promise((resolve) => {
     const chunks = [];
@@ -19,12 +19,13 @@ const invoke = (
         resolve({ status: this.statusCode, body: chunks.join('') });
       },
     };
+    const dataChunks =
+      rawChunks || (body ? [Buffer.from(JSON.stringify(body))] : []);
     const req = {
       method,
       url,
       on(event, listener) {
-        if (event === 'data' && body)
-          listener(Buffer.from(JSON.stringify(body)));
+        if (event === 'data') for (const chunk of dataChunks) listener(chunk);
         if (event === 'end') listener();
         return this;
       },
@@ -109,5 +110,30 @@ test('a blank question never reaches the service', async () => {
     body: { question: '  ' },
   });
   assert.equal(status, 400);
+  assert.equal(called, false);
+});
+
+test('an oversized request body is rejected without reaching the service', async () => {
+  let called = false;
+  const middleware = createSovereignMiddleware({
+    baseUrl: 'http://intel.local:8080',
+    fetchImpl: async () => {
+      called = true;
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+  });
+  // 65536 bytes is the limit; deliver more than that across several chunks
+  // to exercise the accumulate-as-it-arrives path, not a single huge chunk.
+  const chunkSize = 8192;
+  const chunkCount = 9; // 9 * 8192 = 73728 bytes, over the 65536 cap
+  const rawChunks = Array.from({ length: chunkCount }, () =>
+    Buffer.alloc(chunkSize, 'a'),
+  );
+  const { status } = await invoke(middleware, {
+    method: 'POST',
+    url: '/query',
+    rawChunks,
+  });
+  assert.equal(status, 413);
   assert.equal(called, false);
 });
