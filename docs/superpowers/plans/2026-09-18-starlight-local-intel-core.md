@@ -1131,6 +1131,12 @@ export function sovereignIntelProxy(options = {}) {
 Run: `node --test src/sources/sovereignProxy.test.mjs`
 Expected: PASS, 5 tests.
 
+**Bound (added after review):** the proxy's `readBody` caps the browser's
+request body at 64 KB (65536 bytes, a named constant matching the service),
+stopping accumulation as chunks arrive, and the middleware replies 413 without
+contacting the service. The proxy runs inside the process serving production
+traffic, so unbounded buffering there is worse than in the service itself.
+
 - [ ] **Step 5: Register the provider**
 
 In `server/providers/local.js`, add alongside the other imports:
