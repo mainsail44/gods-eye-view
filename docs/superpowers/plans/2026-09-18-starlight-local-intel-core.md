@@ -21,6 +21,9 @@
 - Banned words in any user-visible copy: unlock, empower, supercharge, revolutionize, blazing fast, next-gen, journey.
 - Never imply Mainsail hosts anything. Starlight is software the customer runs.
 - Run `npm run format` before each commit; the repo gates on `npm run format:check` with Prettier 3.9.6.
+- Commit messages carry NO `Co-Authored-By:` trailers and no AI attribution of any kind.
+- New `*.test.mjs` files must be added to `scripts/format-scope.json`; `scripts/format.mjs` excludes them from auto-discovery, so they otherwise escape the formatting gate.
+- A module belongs in a `scripts/package-boundaries.json` group only if that group actually imports it.
 
 ---
 
@@ -457,13 +460,14 @@ const METRIC_HINTS = [
   'snr',
   'signal',
   'propagation',
-  'spot',
-  'average',
-  'trend',
+  'noise floor',
+  'dx spot',
+  'dx spots',
   'over time',
   'last hour',
   'last day',
-  'noise',
+  'average snr',
+  'average signal',
 ];
 
 /** Signals are aggregates, places are documents; the retriever needs to know which. */
