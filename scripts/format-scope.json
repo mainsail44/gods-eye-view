@@ -677,6 +677,7 @@
   "src/sources/httpBody.js",
   "src/sources/intelEndpoint.js",
   "src/sources/intelEndpoint.test.mjs",
+  "src/sources/intelCorpus.test.mjs",
   "src/sources/intel.js",
   "src/sources/intel.test.mjs",
   "src/sources/overpass.js",
