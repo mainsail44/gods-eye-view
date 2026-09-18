@@ -3,11 +3,17 @@ import assert from 'node:assert/strict';
 import { resolveIntelBaseUrl, intelUrl } from './intelEndpoint.js';
 
 test('strips a trailing slash from the base URL', () => {
-  assert.equal(resolveIntelBaseUrl('http://intel.local:8080/'), 'http://intel.local:8080');
+  assert.equal(
+    resolveIntelBaseUrl('http://intel.local:8080/'),
+    'http://intel.local:8080',
+  );
 });
 
 test('keeps a path prefix intact', () => {
-  assert.equal(resolveIntelBaseUrl('http://intel.local/v1/'), 'http://intel.local/v1');
+  assert.equal(
+    resolveIntelBaseUrl('http://intel.local/v1/'),
+    'http://intel.local/v1',
+  );
 });
 
 test('rejects a relative or non-http base URL', () => {
@@ -17,6 +23,12 @@ test('rejects a relative or non-http base URL', () => {
 });
 
 test('joins a path onto the base exactly once', () => {
-  assert.equal(intelUrl('http://intel.local', '/query'), 'http://intel.local/query');
-  assert.equal(intelUrl('http://intel.local/', 'query'), 'http://intel.local/query');
+  assert.equal(
+    intelUrl('http://intel.local', '/query'),
+    'http://intel.local/query',
+  );
+  assert.equal(
+    intelUrl('http://intel.local/', 'query'),
+    'http://intel.local/query',
+  );
 });
