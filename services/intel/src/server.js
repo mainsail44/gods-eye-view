@@ -1,10 +1,34 @@
 import { corpusChecksum, selectRetrievalMode } from './corpus.js';
 
+/** Reject a request body larger than this before it is ever parsed. */
+const MAX_BODY_BYTES = 65536; // 64 KB
+/** Reject a question longer than this before any retrieval work runs. */
+const MAX_QUESTION_LENGTH = 2000;
+/** Cap the distinct terms scored per record, regardless of question length. */
+const MAX_QUERY_TERMS = 50;
+
+/** Sentinel distinguishing "body exceeded the size cap" from invalid JSON or an empty body. */
+const TOO_LARGE = Symbol('too-large');
+
 const readBody = (req) =>
   new Promise((resolve) => {
     const chunks = [];
-    req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      const buf = Buffer.from(chunk);
+      size += buf.length;
+      if (size > MAX_BODY_BYTES) {
+        // Stop accumulating as soon as the cap is crossed; drop what we have.
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(buf);
+    });
     req.on('end', () => {
+      if (tooLarge) return resolve(TOO_LARGE);
       try {
         resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {});
       } catch {
@@ -21,10 +45,11 @@ const send = (res, status, payload) => {
 
 /** Rank corpus records by naive term overlap; sufficient before embeddings. */
 function retrieve(corpus, question, limit) {
-  const terms = String(question)
+  const rawTerms = String(question)
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
+  const terms = [...new Set(rawTerms)].slice(0, MAX_QUERY_TERMS);
   if (!terms.length) return [];
   return corpus
     .map((record) => {
@@ -71,8 +96,11 @@ export function createIntelHandler({
 
     if (req.method === 'POST' && path === '/query') {
       const body = await readBody(req);
+      if (body === TOO_LARGE) return send(res, 413, { error: 'Request body too large' });
       const question = String(body?.question ?? '').trim();
       if (!question) return send(res, 400, { error: 'A question is required' });
+      if (question.length > MAX_QUESTION_LENGTH)
+        return send(res, 400, { error: 'Question too long' });
       const requested = Number(body?.limit);
       const limit = Number.isFinite(requested)
         ? Math.min(50, Math.max(1, Math.trunc(requested)))

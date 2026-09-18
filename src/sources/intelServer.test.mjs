@@ -133,3 +133,69 @@ test('a blank question is rejected', async () => {
   });
   assert.equal(status, 400);
 });
+
+test('a body over 64 KB is rejected before parsing', async () => {
+  let modelCalled = false;
+  const handler = createIntelHandler({
+    corpus: RECORDS,
+    model: 'local-model',
+    runtime: 'llama.cpp',
+    answer: async () => {
+      modelCalled = true;
+      return { answer: 'should not happen', citations: [] };
+    },
+  });
+  const { status, body } = await invoke(handler, {
+    method: 'POST',
+    url: '/query',
+    body: { question: 'london', padding: 'x'.repeat(70000) },
+  });
+  assert.equal(status, 413);
+  const payload = JSON.parse(body);
+  assert.match(payload.error, /too large/i);
+  assert.equal(modelCalled, false);
+});
+
+test('a question over 2000 characters is rejected', async () => {
+  let modelCalled = false;
+  const handler = createIntelHandler({
+    corpus: RECORDS,
+    model: 'local-model',
+    runtime: 'llama.cpp',
+    answer: async () => {
+      modelCalled = true;
+      return { answer: 'should not happen', citations: [] };
+    },
+  });
+  const { status, body } = await invoke(handler, {
+    method: 'POST',
+    url: '/query',
+    body: { question: 'x'.repeat(2001) },
+  });
+  assert.equal(status, 400);
+  const payload = JSON.parse(body);
+  assert.match(payload.error, /too long/i);
+  assert.equal(modelCalled, false);
+});
+
+test('a question with more than 50 distinct terms still retrieves correctly', async () => {
+  const fillers = Array.from({ length: 60 }, (_, i) => `filler${i}`).join(' ');
+  const question = `london ${fillers}`;
+  const handler = createIntelHandler({
+    corpus: RECORDS,
+    model: 'local-model',
+    runtime: 'llama.cpp',
+    answer: async ({ records }) => ({
+      answer: `Matched ${records.length} record(s).`,
+      citations: records.map((record) => ({ id: record.id })),
+    }),
+  });
+  const { status, body } = await invoke(handler, {
+    method: 'POST',
+    url: '/query',
+    body: { question },
+  });
+  assert.equal(status, 200);
+  const payload = JSON.parse(body);
+  assert.equal(payload.citations[0].id, 'dc-1');
+});
