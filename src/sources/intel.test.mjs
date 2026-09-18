@@ -72,3 +72,24 @@ test('builds a bounded query body', () => {
 test('rejects a blank question', () => {
   assert.throws(() => buildIntelQueryBody('   '), TypeError);
 });
+
+test('preserves symbol characters in text', () => {
+  const answer = normalizeIntelAnswer({
+    answer: 'Temperature is 25°C with a →northward trend and +5% increase',
+    citations: [{ id: 'test', label: 'Site @ 10°N, 20°E', lat: 10, lon: 20 }],
+  });
+  assert.equal(
+    answer.answer,
+    'Temperature is 25°C with a →northward trend and +5% increase',
+  );
+  assert.equal(answer.citations[0].label, 'Site @ 10°N, 20°E');
+});
+
+test('removes control characters from text', () => {
+  const answer = normalizeIntelAnswer({
+    answer: 'Alert:\x00Data\x1Fcorrupted',
+    citations: [{ id: 'test', label: 'Site\x08Name', lat: 0, lon: 0 }],
+  });
+  assert.equal(answer.answer, 'Alert: Data corrupted');
+  assert.equal(answer.citations[0].label, 'Site Name');
+});

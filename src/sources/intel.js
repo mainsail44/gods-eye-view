@@ -8,7 +8,7 @@ const MAX_CITATIONS = 50;
 
 const text = (value, max = 200) =>
   String(value ?? '')
-    .replace(/[^\p{L}\p{N}\p{P}\p{Z}]/gu, '')
+    .replace(/\p{Cc}/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, max);
@@ -46,18 +46,22 @@ const citation = (entry) => {
   return Object.freeze({ id, label: text(entry.label, 200), lat, lon });
 };
 
+const action = (entry) => {
+  if (!entry || typeof entry !== 'object') return null;
+  return Object.freeze({ ...entry });
+};
+
 /** Normalize an answer, discarding citations that cannot be placed on the globe. */
 export function normalizeIntelAnswer(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const citations = Array.isArray(source.citations) ? source.citations : [];
+  const actions = Array.isArray(source.actions) ? source.actions : [];
   return Object.freeze({
     answer: text(source.answer, MAX_ANSWER_CHARS),
     citations: Object.freeze(
       citations.slice(0, MAX_CITATIONS).map(citation).filter(Boolean),
     ),
-    actions: Object.freeze(
-      Array.isArray(source.actions) ? [...source.actions] : [],
-    ),
+    actions: Object.freeze(actions.map(action).filter(Boolean)),
   });
 }
 
