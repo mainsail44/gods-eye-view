@@ -277,7 +277,7 @@ const MAX_CITATIONS = 50;
 
 const text = (value, max = 200) =>
   String(value ?? '')
-    .replace(/[ -]/g, ' ')
+    .replace(/\p{Cc}/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, max);
