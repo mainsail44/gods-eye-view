@@ -1444,6 +1444,18 @@ git commit -m "feat: add Starlight Local Intel panel behavior"
 
 ### Task 7: Register the component as a toggleable layer
 
+> **Corrected layer contract.** The interface below was wrong as first written:
+> it gave the layer only `init`, `setLifecyclePresentation` and `destroy`. The
+> lifecycle manager (`src/data/lifecycle.js`) calls `init(viewer)`,
+> `enable(viewer, { signal })`, `update(viewer, { signal })` and `disable()` with
+> no `typeof` guard, so toggling the layer threw and left it in a stuck state.
+> The shipped layer (`src/app/layers/starlightIntel.js`) is authoritative:
+> `enable()` starts the panel and returns true, `disable()` stops it, `update()`
+> is a no-op returning true, `updateInterval` stays 0, and there is deliberately
+> NO `setLifecyclePresentation` — the manager fires that hook on every state
+> transition, including mid-enable with `enabled: false`, which would flap the
+> panel. Every panel call is optional, so a layer built with no panel is inert.
+
 Uses the existing layer-state registry so the toggle appears in Data Layers, persists locally, and travels in share links.
 
 **Files:**
