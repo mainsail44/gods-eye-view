@@ -1610,6 +1610,18 @@ git commit -m "feat: register Starlight Local Intel as a toggleable layer"
 
 ### Task 8: Render the panel and verify end to end
 
+> **Corrected wiring.** Two instructions below were wrong as first written.
+> (1) The template marker belongs in `index.html`, beside the other
+> `<!-- gev:template ... -->` markers — the expander makes one pass over
+> `index.html` only, so a marker nested inside `scene-chrome.html` never expands.
+> (2) The composition root is `src/standalone/application.js`, not
+> `src/ui/applicationShell.js`: the catalog is built there inside `createScene`
+> via `createStandaloneCatalog` (`src/standalone/catalog.js`), which must pass
+> `starlightIntelPanel` through to `createApplicationCatalog`. DOM binding lives
+> in its own small module rather than in the shell. The layer no longer has a
+> `setLifecyclePresentation` hook (see Task 7); the manager's `enable()` /
+> `disable()` calls drive the panel.
+
 **Files:**
 - Create: `src/ui/templates/starlight-intel.html`
 - Modify: `build/application-html.js` (`APPLICATION_TEMPLATES`)
