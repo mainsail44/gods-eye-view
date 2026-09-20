@@ -20,19 +20,27 @@ export function createStarlightIntelPanel({
   let enabled = false;
   let timer = null;
   let controller = null;
+  let queryController = null;
   let health = OFFLINE;
   let answer = EMPTY;
   let status = 'Disabled';
+  let generation = 0;
 
   const render = () => onRender({ enabled, health, answer, status });
 
   const poll = async () => {
     if (!enabled) return;
+    const mine = generation;
     controller = new AbortController();
     try {
-      health = normalizeIntelHealth(await transport.health(controller.signal));
+      const result = normalizeIntelHealth(
+        await transport.health(controller.signal),
+      );
+      if (mine !== generation) return;
+      health = result;
       status = health.ok ? 'Local' : 'Intel service unavailable';
     } catch {
+      if (mine !== generation) return;
       health = OFFLINE;
       status = 'Intel service unavailable';
     }
@@ -45,6 +53,7 @@ export function createStarlightIntelPanel({
     enable() {
       if (enabled) return;
       enabled = true;
+      generation += 1;
       status = 'Connecting';
       render();
       void poll();
@@ -53,10 +62,13 @@ export function createStarlightIntelPanel({
     disable() {
       if (!enabled) return;
       enabled = false;
+      generation += 1;
       if (timer) clearTimeout(timer);
       timer = null;
       controller?.abort();
       controller = null;
+      queryController?.abort();
+      queryController = null;
       health = OFFLINE;
       answer = EMPTY;
       status = 'Disabled';
@@ -65,6 +77,7 @@ export function createStarlightIntelPanel({
 
     async ask(question) {
       if (!enabled) return;
+      const mine = generation;
       let body;
       try {
         body = buildIntelQueryBody(question);
@@ -75,14 +88,18 @@ export function createStarlightIntelPanel({
       }
       status = 'Thinking';
       render();
-      const queryController = new AbortController();
+      if (queryController) queryController.abort();
+      queryController = new AbortController();
       try {
-        answer = normalizeIntelAnswer(
+        const result = normalizeIntelAnswer(
           await transport.query(body, queryController.signal),
         );
+        if (mine !== generation) return;
+        answer = result;
         status = health.ok ? 'Local' : 'Local (health unknown)';
         for (const cite of answer.citations) onCite(cite);
       } catch {
+        if (mine !== generation) return;
         answer = EMPTY;
         status = 'Intel service unavailable';
       }
