@@ -32,6 +32,40 @@ export const CAMERA_PRESETS = {
 };
 
 /**
+ * Framing for a single facility-scale feature — a data centre, a cable
+ * landing, an installation. High enough to keep the site's surroundings in
+ * frame, low enough that the site itself is legible.
+ */
+export const FACILITY_VIEW_ALTITUDE = 3000;
+
+/**
+ * Fly the camera to a ground coordinate. Unlike the presets above the caller
+ * supplies the position, so an unusable one is ignored rather than thrown:
+ * callers pass through coordinates that came from outside the application.
+ * @param {object} viewer Cesium viewer.
+ * @param {{lat:number, lon:number, alt?:number, heading?:number, pitch?:number}} target
+ * @param {number} [duration] Flight duration in seconds.
+ */
+export function flyToCoordinate(
+  viewer,
+  { lat, lon, alt = FACILITY_VIEW_ALTITUDE, heading = 0, pitch = -45 } = {},
+  duration = 2.4,
+) {
+  if (!viewer || viewer.isDestroyed?.()) return;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(lon, lat, alt),
+    orientation: {
+      heading: Cesium.Math.toRadians(heading),
+      pitch: Cesium.Math.toRadians(pitch),
+      roll: 0.0,
+    },
+    duration: Math.max(0.2, duration || 0),
+    easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+  });
+}
+
+/**
  * Fly the camera to a preset location with a smooth animation.
  */
 export function flyToPreset(viewer, presetName, duration = 3.0) {

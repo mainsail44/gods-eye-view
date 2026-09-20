@@ -24,3 +24,19 @@ services:
     ports:
       - '4173:4173'
     restart: unless-stopped
+
+  # Starlight Local Intel. Independent of the app service on purpose: the app
+  # must start and serve with this one down, and the proxy answers 503 while it
+  # is. The entrypoint reads ./corpus/corpus.json at startup, so until the
+  # corpus build lands this container exits immediately and restarts in a loop.
+  starlight-intel:
+    image: localhost/starlight-intel:latest
+    build:
+      context: .
+      dockerfile: services/intel/Containerfile
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./corpus:/app/corpus:ro
+    restart: unless-stopped

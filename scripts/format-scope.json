@@ -251,6 +251,7 @@
   "src/ui/shellFeedback.js",
   "src/ui/starlightIntel.js",
   "src/ui/starlightIntel.test.mjs",
+  "src/ui/starlightIntelView.test.mjs",
   "src/ui/uiLifetime.js",
   "src/ui/styles.js",
   "src/ui/shellLifecycle.test.mjs",

@@ -6,9 +6,59 @@ import { createStandaloneScene } from './scene.js';
 import { createStandaloneControls } from './controls.js';
 import { createStandaloneData } from './data.js';
 import { createStandaloneTools } from './tools.js';
+import { createStarlightIntelPanel } from '../ui/starlightIntel.js';
+import { createStarlightIntelView } from '../ui/starlightIntelView.js';
+import { flyToCoordinate } from '../camera.js';
 
 // The existing controls and layer catalog contain page-scoped state.
 let constructed = false;
+
+// The browser reaches the intel service only through the server-side proxy,
+// which holds the service URL. No intel request ever names the service.
+const INTEL_API = '/api/intel';
+
+const intelTransport = {
+  async health(signal) {
+    const response = await fetch(`${INTEL_API}/health`, { signal });
+    return response.json();
+  },
+  async query(body, signal) {
+    const response = await fetch(`${INTEL_API}/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+    return response.json();
+  },
+};
+
+/**
+ * Bind the Starlight Local Intel markup to a panel the catalog layer drives.
+ * The camera flight belongs to the click, not to the answer: the panel's
+ * `onCite` fires once per citation the moment an answer lands, so driving the
+ * camera from it would race eight flights against each other for one question.
+ * @param {object} viewer Cesium viewer supplying the camera.
+ * @param {Function} defer Registers teardown with the owning component.
+ * @returns {object|undefined} The panel, when the markup is present.
+ */
+function createStarlightIntel(viewer, defer) {
+  const element = document.getElementById('starlight-intel');
+  if (!element) return undefined;
+  let panel;
+  const view = createStarlightIntelView({
+    element,
+    onAsk: (question) => void panel.ask(question),
+    onCiteClick: (citation) => flyToCoordinate(viewer, citation),
+  });
+  panel = createStarlightIntelPanel({
+    transport: intelTransport,
+    onRender: (state) => view.render(state),
+  });
+  defer(() => panel.disable());
+  view.render(panel.state());
+  return panel;
+}
 
 /** Compose the standalone application once per page. Reload to start again. */
 export function createStandaloneApplication({
@@ -49,6 +99,7 @@ export function createStandaloneApplication({
             signal,
             placeSearch,
           ),
+        starlightIntelPanel: createStarlightIntel(scene.viewer, context.defer),
         signal: context.signal,
         surface: scene.operations.surface,
       });

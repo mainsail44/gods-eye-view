@@ -363,3 +363,118 @@
 #intel-hud[data-variant='minimal'] .hud-summary-wrap {
   max-width: 280px;
 }
+
+/* ── Starlight Local Intel ──────────────────── */
+/* The left rail (Data Layers) and the right rail (Display, CCTV, Context)
+   both run from 26vh down to within ~4vh of the bottom, and the command dock
+   spans the bottom edge. The free lane is the centre column above the dock,
+   clear of the map credits at calc(2vh + 7rem). */
+.starlight-intel {
+  position: fixed;
+  bottom: calc(2vh + 9rem);
+  left: 50%;
+  z-index: 120;
+  width: min(360px, calc(100vw - 40px));
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--panel-radius);
+  background: rgba(0, 0, 0, 0.62);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.starlight-intel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.starlight-intel-title {
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.starlight-intel-status {
+  color: var(--text-secondary);
+}
+
+.starlight-intel-meta {
+  margin-bottom: 8px;
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.starlight-intel-ask {
+  display: flex;
+  gap: 6px;
+}
+
+.starlight-intel-ask input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: rgba(0, 0, 0, 0.4);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.starlight-intel-ask button {
+  padding: 6px 12px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--btn-radius);
+  background: rgba(0, 212, 255, 0.12);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.starlight-intel-ask button:hover {
+  border-color: var(--glass-border-hover);
+  background: rgba(0, 212, 255, 0.2);
+}
+
+.starlight-intel-answer {
+  margin-top: 8px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.starlight-intel-citations {
+  margin: 8px 0 0;
+  padding-left: 16px;
+}
+
+.starlight-intel-citation {
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.starlight-intel-citation:hover {
+  text-decoration: underline;
+}
+
+/* Recording and clean view hide operator chrome; this panel is chrome. */
+body.ui-clean-view .starlight-intel,
+body.recording-mode .starlight-intel {
+  display: none;
+}

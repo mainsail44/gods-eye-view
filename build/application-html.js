@@ -7,6 +7,7 @@ export const APPLICATION_TEMPLATES = Object.freeze([
   'command-dock',
   'layer-panels',
   'context',
+  'starlight-intel',
   'welcome',
   'provider-settings',
   'hud-loading',

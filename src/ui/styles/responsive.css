@@ -240,6 +240,16 @@
     max-width: calc(100vw - 24px);
     text-align: center;
   }
+
+  /* The command dock stacks into two rows here; clear it and span the width. */
+  .starlight-intel {
+    right: 12px;
+    bottom: calc(8px + 11rem);
+    left: 12px;
+    width: auto;
+    max-height: 36vh;
+    transform: none;
+  }
 }
 
 @media (max-width: 520px) {

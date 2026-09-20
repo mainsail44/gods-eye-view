@@ -7,6 +7,10 @@ export { createStandaloneReferenceSources } from './layerSources.js';
 /** Create fresh layer instances using the existing standalone source choices. */
 export function createStandaloneCatalog({
   nepalBoundaryResolver,
+  // Supplied by the composition root, which owns the panel's DOM binding.
+  // Compatibility callers construct a catalog without one; the layer treats
+  // every panel call as optional.
+  starlightIntelPanel,
   signal = new AbortController().signal,
   surface = createSurfaceServices({
     terrainSource: createApplicationRequestServices().terrain,
@@ -15,6 +19,7 @@ export function createStandaloneCatalog({
 } = {}) {
   return createApplicationCatalog({
     nepalBoundaryResolver,
+    starlightIntelPanel,
     surface,
     sources: createStandaloneLayerSources(),
     signal,
