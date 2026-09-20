@@ -1193,6 +1193,16 @@ git commit -m "feat: proxy the intel service behind /api/intel"
 
 ### Task 6: Starlight Local Intel panel behavior
 
+> **Superseded reference code.** The implementation below was found defective in
+> review and must not be transcribed again. It let `disable()` leave an in-flight
+> query running, let results that resolved after `disable()` write state and fire
+> `onCite`, and let `enable(); disable(); enable();` start two poll loops. The
+> shipped module (`src/ui/starlightIntel.js`) is authoritative: a generation
+> counter incremented by both `enable()` and `disable()`, plus a per-`ask()`
+> controller identity check, each compared after every await in both the success
+> and catch paths before any state write, render, `onCite`, or timer re-arm. Tests
+> for this module only count if they fail against the code they claim to catch.
+
 The component's behavior, independent of the DOM it renders into. The decisive rule: disabled means no network traffic at all.
 
 **Files:**
