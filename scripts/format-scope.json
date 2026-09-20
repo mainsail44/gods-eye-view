@@ -602,6 +602,8 @@
   "src/app/layers/satellites.js",
   "src/app/layers/militaryAwareness.js",
   "src/app/layers/rocketLaunches.js",
+  "src/app/layers/starlightIntel.js",
+  "src/app/layers/starlightIntel.test.mjs",
   "src/app/layers/overlayHost.js",
   "src/app/layers/aisLiveVessels.js",
   "src/app/constructCatalog.js",

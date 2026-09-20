@@ -16,6 +16,7 @@ import { createApplicationLaunches } from './layers/rocketLaunches.js';
 import { createApplicationAlpr } from './layers/alprCameras.js';
 import { createApplicationAwareness } from './layers/militaryAwareness.js';
 import { createApplicationFirms } from './layers/firms.js';
+import { createApplicationStarlightIntel } from './layers/starlightIntel.js';
 import { createApplicationEarthquakes } from './layers/earthquakes.js';
 import { createApplicationCables } from './layers/submarineCables.js';
 import { createInfrastructureLayers } from '../data/infrastructure.js';
@@ -58,6 +59,7 @@ export function createApplicationCatalog({
   vesselOptions,
   resolveAsset,
   nepalBoundaryResolver,
+  starlightIntelPanel,
 }) {
   if (!signal?.addEventListener)
     throw new TypeError('An application lifetime signal is required');
@@ -138,6 +140,7 @@ export function createApplicationCatalog({
           source: 'NASA FIRMS · LIVE',
           feed: sources.firms,
         }),
+        createApplicationStarlightIntel({ panel: starlightIntelPanel }),
       ],
       metadata,
     );
