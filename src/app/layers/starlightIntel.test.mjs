@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createApplicationStarlightIntel } from './starlightIntel.js';
 import { LAYER_STATE_REGISTRY } from '../../data/layerState.js';
+import { LayerLifecycle } from '../../data/lifecycle.js';
 
 const panelStub = () => {
   const calls = [];
@@ -16,15 +17,38 @@ test('exposes the catalog contract', () => {
   const layer = createApplicationStarlightIntel({ panel: panelStub() });
   assert.equal(layer.id, 'starlight-intel');
   assert.equal(layer.name, 'Starlight Local Intel');
-  assert.equal(typeof layer.setLifecyclePresentation, 'function');
+  assert.equal(typeof layer.init, 'function');
+  assert.equal(typeof layer.enable, 'function');
+  assert.equal(typeof layer.update, 'function');
+  assert.equal(typeof layer.disable, 'function');
+  // The manager's optional presentation hook must NOT be implemented — see
+  // the module comment: it fires on transitional states too, and would
+  // double-drive the panel alongside enable()/disable().
+  assert.equal('setLifecyclePresentation' in layer, false);
 });
 
-test('lifecycle presentation drives the panel', () => {
+test('enable() drives the panel on and reports success', () => {
   const panel = panelStub();
   const layer = createApplicationStarlightIntel({ panel });
-  layer.setLifecyclePresentation({ enabled: true });
-  layer.setLifecyclePresentation({ enabled: false });
-  assert.deepEqual(panel.calls, ['enable', 'disable']);
+  const result = layer.enable();
+  assert.notEqual(result, false);
+  assert.deepEqual(panel.calls, ['enable']);
+});
+
+test('disable() drives the panel off and reports success', () => {
+  const panel = panelStub();
+  const layer = createApplicationStarlightIntel({ panel });
+  const result = layer.disable();
+  assert.notEqual(result, false);
+  assert.deepEqual(panel.calls, ['disable']);
+});
+
+test('update() is a no-op that reports success', () => {
+  const panel = panelStub();
+  const layer = createApplicationStarlightIntel({ panel });
+  const result = layer.update();
+  assert.notEqual(result, false);
+  assert.deepEqual(panel.calls, []);
 });
 
 test('destroy stops the panel', () => {
@@ -51,8 +75,9 @@ test('is registered for state serialization with a unique token', () => {
 test('a missing panel is a no-op rather than a throw', () => {
   const withEmptyOptions = createApplicationStarlightIntel({});
   assert.doesNotThrow(() => {
-    withEmptyOptions.setLifecyclePresentation({ enabled: true });
-    withEmptyOptions.setLifecyclePresentation({ enabled: false });
+    withEmptyOptions.enable();
+    withEmptyOptions.update();
+    withEmptyOptions.disable();
     withEmptyOptions.destroy();
   });
 
@@ -60,8 +85,36 @@ test('a missing panel is a no-op rather than a throw', () => {
     panel: undefined,
   });
   assert.doesNotThrow(() => {
-    withExplicitUndefined.setLifecyclePresentation({ enabled: true });
-    withExplicitUndefined.setLifecyclePresentation({ enabled: false });
+    withExplicitUndefined.enable();
+    withExplicitUndefined.update();
+    withExplicitUndefined.disable();
     withExplicitUndefined.destroy();
   });
+});
+
+test('a real LayerLifecycle can enable and disable the layer end to end', async () => {
+  const panel = panelStub();
+  const layer = createApplicationStarlightIntel({ panel });
+  const manager = new LayerLifecycle({});
+  manager.register(layer);
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    const enabled = await manager.setEnabled('starlight-intel', true, {
+      origin: 'user',
+    });
+    assert.equal(enabled, true);
+    assert.deepEqual(panel.calls, ['enable']);
+
+    const disabled = await manager.setEnabled('starlight-intel', false, {
+      origin: 'user',
+    });
+    assert.equal(disabled, true);
+    assert.deepEqual(panel.calls, ['enable', 'disable']);
+    assert.deepEqual(warnings, []);
+  } finally {
+    console.warn = originalWarn;
+    await manager.destroyLayer('starlight-intel');
+  }
 });
