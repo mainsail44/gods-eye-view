@@ -179,7 +179,7 @@ test('a query resolving after disable() changes nothing', async () => {
   assert.equal(renderCount, renderCountAfterDisable);
 });
 
-test('a health response resolving after disable() changes nothing', async () => {
+test('a healthy health response after disable does not overwrite offline state', async () => {
   let healthResolve;
   const transport = {
     async health(signal) {
@@ -194,72 +194,102 @@ test('a health response resolving after disable() changes nothing', async () => 
   const panel = createStarlightIntelPanel({ transport });
   panel.enable();
   await settle();
-  // Panel starts with ok: false (OFFLINE) before health resolves
+  // First health call pending
   assert.equal(panel.state().health.ok, false);
-  // Resolve the first health call
-  healthResolve?.({ model: 'ok', runtime: 'llama.cpp', egress: 'blocked' });
-  await settle();
-  // Now health should be ok
-  assert.equal(panel.state().health.ok, true);
-  // Disable the panel
   panel.disable();
   await settle();
-  // Health should revert to offline
+  // After disable, health is offline and status is Disabled
   assert.equal(panel.state().health.ok, false);
-  // Now if a second health call (from before disable) resolves, it should not change state
-  // This test verifies that stale health responses don't overwrite the offline state
+  assert.equal(panel.state().status, 'Disabled');
+  const statusBefore = panel.state().status;
+  // Resolve the stale health call with good health
+  healthResolve?.({ model: 'ok', runtime: 'llama.cpp', egress: 'blocked' });
+  await settle();
+  // State should NOT change — health still offline, status unchanged
+  assert.equal(panel.state().health.ok, false);
+  assert.equal(panel.state().status, statusBefore);
 });
 
-test('enable/disable/enable does not double the loop', async () => {
-  const calls = { health: 0, concurrentCalls: 0, maxConcurrent: 0 };
-  const activePromises = new Set();
-  let healthResolve;
+test('a rejected health call after disable does not change state', async () => {
+  let healthReject;
   const transport = {
     async health(signal) {
-      calls.health += 1;
-      calls.concurrentCalls += 1;
-      if (calls.concurrentCalls > calls.maxConcurrent) {
-        calls.maxConcurrent = calls.concurrentCalls;
-      }
-      activePromises.add('health-' + calls.health);
-      try {
-        return new Promise((resolve) => {
-          healthResolve = resolve;
-        });
-      } finally {
-        calls.concurrentCalls -= 1;
-        activePromises.delete('health-' + calls.health);
-      }
+      return new Promise((resolve, reject) => {
+        healthReject = reject;
+      });
     },
     async query() {
       return { answer: 'test', citations: [] };
     },
   };
-  const panel = createStarlightIntelPanel({ transport, pollMs: 1000 });
+  const panel = createStarlightIntelPanel({ transport });
   panel.enable();
   await settle();
-  assert.equal(calls.health, 1);
+  // First health call pending
   panel.disable();
   await settle();
+  // After disable, health is offline, status is Disabled
+  assert.equal(panel.state().health.ok, false);
+  assert.equal(panel.state().status, 'Disabled');
+  const statusBefore = panel.state().status;
+  // Reject the stale health call
+  healthReject?.(new Error('stale rejection'));
+  await settle();
+  // State should NOT change — health still offline, status unchanged
+  assert.equal(panel.state().health.ok, false);
+  assert.equal(panel.state().status, statusBefore);
+});
+
+test('enable/disable/enable does not double the loop', async () => {
+  const calls = [];
+  const pendingResolvers = new Map();
+  const transport = {
+    async health(signal) {
+      const callNum = calls.length + 1;
+      calls.push({ num: callNum, resolved: false });
+      return new Promise((resolve, reject) => {
+        pendingResolvers.set(callNum, { resolve, reject });
+      });
+    },
+    async query() {
+      return { answer: 'test', citations: [] };
+    },
+  };
+  const panel = createStarlightIntelPanel({ transport, pollMs: 5 });
+  // First enable: health call #1 pending
   panel.enable();
   await settle();
-  // At this point, should have exactly one more health call
-  assert.equal(calls.health, 2);
-  // Max concurrent should never exceed 1
-  assert.equal(calls.maxConcurrent, 1);
-  // Now resolve the first (stale) health call
-  const beforeResolve = calls.health;
-  healthResolve?.({ model: 'stale', runtime: 'llama.cpp', egress: 'blocked' });
+  assert.equal(calls.length, 1);
+  // Disable: clears generation and stops polling
+  panel.disable();
   await settle();
-  // Resolving the stale health should not trigger another health call
-  assert.equal(calls.health, beforeResolve);
-  // And still only one concurrent
-  assert.equal(calls.maxConcurrent, 1);
+  // Second enable: health call #2 pending
+  panel.enable();
+  await settle();
+  assert.equal(calls.length, 2);
+  // Now resolve the first (stale) health call
+  pendingResolvers
+    .get(1)
+    .resolve({ model: 'stale', runtime: 'llama.cpp', egress: 'blocked' });
+  await settle();
+  // Wait past pollMs to see if another call is scheduled
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  // Should still be 2 calls, not 3 — stale resolution did not re-arm the loop
+  assert.equal(calls.length, 2);
+  // Now resolve call #2 to let the active loop proceed
+  pendingResolvers
+    .get(2)
+    .resolve({ model: 'ok', runtime: 'llama.cpp', egress: 'blocked' });
+  await settle();
+  // Wait for the next poll to be scheduled
+  await new Promise((resolve) => setTimeout(resolve, 15));
+  // Should now be 3 calls: the new poll was scheduled
+  assert.equal(calls.length, 3);
   panel.disable();
 });
 
-test('a second ask() supersedes the first', async () => {
-  const results = [];
+test('first ask resolves late, second resolves first — second wins', async () => {
+  const cites = [];
   let query1Resolve;
   let query2Resolve;
   let callCount = 0;
@@ -276,9 +306,61 @@ test('a second ask() supersedes the first', async () => {
         } else {
           query2Resolve = resolve;
         }
-        signal.addEventListener('abort', () => {
-          // First call will be aborted
-        });
+      });
+    },
+  };
+  const panel = createStarlightIntelPanel({
+    transport,
+    onCite: (c) => cites.push(c.id),
+  });
+  panel.enable();
+  await settle();
+  const ask1 = panel.ask('first');
+  await settle();
+  const ask2 = panel.ask('second');
+  await settle();
+  // Resolve second query first
+  query2Resolve?.({
+    answer: 'second answer',
+    citations: [{ id: 'cite-2', label: 'C', lat: 3, lon: 4 }],
+  });
+  await ask2;
+  await settle();
+  assert.equal(panel.state().answer.answer, 'second answer');
+  assert.deepEqual(cites, ['cite-2']);
+  // Now resolve first query late
+  query1Resolve?.({
+    answer: 'first answer',
+    citations: [{ id: 'cite-1', label: 'C', lat: 1, lon: 2 }],
+  });
+  await ask1;
+  await settle();
+  // Second answer should still be on screen
+  assert.equal(panel.state().answer.answer, 'second answer');
+  // First citation should NOT have fired
+  assert.deepEqual(cites, ['cite-2']);
+  panel.disable();
+});
+
+test('first ask rejects late after second resolved — second answer preserved', async () => {
+  let query1Resolve;
+  let query1Reject;
+  let query2Resolve;
+  let callCount = 0;
+  const transport = {
+    async health() {
+      return { model: 'local-model', runtime: 'llama.cpp', egress: 'blocked' };
+    },
+    async query(body, signal) {
+      callCount += 1;
+      const myCall = callCount;
+      return new Promise((resolve, reject) => {
+        if (myCall === 1) {
+          query1Resolve = resolve;
+          query1Reject = reject;
+        } else {
+          query2Resolve = resolve;
+        }
       });
     },
   };
@@ -289,22 +371,22 @@ test('a second ask() supersedes the first', async () => {
   await settle();
   const ask2 = panel.ask('second');
   await settle();
-  // First query should be aborted by the second ask
-  // Resolve first query (late)
-  query1Resolve?.({
-    answer: 'first result',
-    citations: [{ id: 'c1', label: 'C', lat: 1, lon: 2 }],
-  });
-  await settle();
   // Resolve second query
   query2Resolve?.({
-    answer: 'second result',
-    citations: [{ id: 'c2', label: 'C', lat: 3, lon: 4 }],
+    answer: 'second answer',
+    citations: [],
   });
-  await ask1;
   await ask2;
   await settle();
-  // Only second answer should be written
-  assert.equal(panel.state().answer.answer, 'second result');
+  assert.equal(panel.state().answer.answer, 'second answer');
+  const goodStatus = panel.state().status;
+  // Now reject first query late
+  query1Reject?.(new Error('first failed'));
+  await ask1;
+  await settle();
+  // Second answer should still be on screen
+  assert.equal(panel.state().answer.answer, 'second answer');
+  // Status should NOT be set to unavailable
+  assert.equal(panel.state().status, goodStatus);
   panel.disable();
 });

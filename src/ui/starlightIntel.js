@@ -90,18 +90,21 @@ export function createStarlightIntelPanel({
       render();
       if (queryController) queryController.abort();
       queryController = new AbortController();
+      const myController = queryController;
       try {
         const result = normalizeIntelAnswer(
-          await transport.query(body, queryController.signal),
+          await transport.query(body, myController.signal),
         );
-        if (mine !== generation) return;
+        if (mine !== generation || queryController !== myController) return;
         answer = result;
         status = health.ok ? 'Local' : 'Local (health unknown)';
         for (const cite of answer.citations) onCite(cite);
+        if (queryController === myController) queryController = null;
       } catch {
-        if (mine !== generation) return;
+        if (mine !== generation || queryController !== myController) return;
         answer = EMPTY;
         status = 'Intel service unavailable';
+        if (queryController === myController) queryController = null;
       }
       render();
     },
