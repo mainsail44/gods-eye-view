@@ -1856,6 +1856,57 @@ git commit -m "feat: render the Starlight Local Intel panel in the HUD"
 
 ---
 
+### Task 9: Corpus, stub runtime, and a deployable intel service
+
+Added after Task 8. The service has had nothing to answer from, and bind mounts
+cannot work on hosts where the container VM does not share the checkout path, so
+the corpus is built INTO the intel image.
+
+**Files:**
+- Create: `services/intel/src/buildCorpus.js` (pure: features in, records out)
+- Create: `services/intel/scripts/build-corpus.mjs` (CLI: reads sources, writes JSON)
+- Create: `services/intel/test/stub-runtime.mjs` (OpenAI-compatible, deterministic)
+- Create: `src/sources/intelBuildCorpus.test.mjs`, `src/sources/intelStubRuntime.test.mjs`
+- Modify: `services/intel/Containerfile`, `services/intel/README.md`, `compose.yaml`, `.env.container.example`
+
+**Interfaces:**
+- Consumes: `corpusChecksum` (Task 3); the service entrypoint's `INTEL_CORPUS`, `INTEL_RUNTIME_URL`, `INTEL_MODEL`, `INTEL_EGRESS` variables (Task 4).
+- Produces: corpus records `{ id: string, kind: 'datacenter'|'landing-point', label: string, lat: number, lon: number, text: string, source: string }`; `buildCorpusRecords({ datacenters, landingPoints }) => Record[]`; `centroid(geometry) => { lat, lon } | null`.
+
+**Requirements:**
+- Sources are the bundled files `src/data/local_data/datacenters/datacenters.geojsonl` (4351 features, Polygon geometry, names under `properties.tags.name` / `operator`) and `src/data/local_data/telegeography_submarine_cables/landing-point-geo.json` (1917 Point features, `properties.id` / `name`). Read each source directory's README and carry its attribution into the record's `source` field and into `services/intel/README.md`.
+- Polygon and MultiPolygon features get a centroid; a feature with no usable coordinate is skipped, never emitted with `NaN`.
+- Record ids are stable and unique across kinds (`dc-<osm_id>`, `lp-<id>`). Duplicate ids are a build error, not a silent overwrite.
+- Retrieval is term overlap over `label` + `text`, so `text` must carry what an operator would ask about. For a datacenter: name, operator, and — computed at build time — the nearest cable landing point and its great-circle distance in kilometres (`nearest cable landing point: <name> (<n> km)`). That precomputed join is what lets "which datacenters are near the <place> landing" be answered by text retrieval alone. For a landing point: its name (which includes the country).
+- Output is deterministic: same inputs, byte-identical file (stable ordering, fixed numeric precision). The checksum the service reports depends on it.
+- The Containerfile builds the corpus during `podman build` from the bundled sources (build context is the repo root) and places it at the path `INTEL_CORPUS` points to. No bind mount. The generated corpus is NOT committed.
+- The stub runtime implements `POST /v1/chat/completions` and returns a deterministic answer derived from the request (record count and the first record ids it was shown), so browser assertions can be exact. It must say in its answer text that it is a stub, so a stub answer can never be mistaken for a model's. It listens on a port given by `PORT`.
+- `compose.yaml`: under the `intel` profile, run `starlight-intel` (corpus baked in) and `intel-runtime-stub`; the app service gets `STARLIGHT_INTEL_URL=http://starlight-intel:8080`. `INTEL_RUNTIME_URL` defaults to the stub and is overridable from `.env`, so pointing it at a real OpenAI-compatible runtime (for example Ollama on the host) needs no file edit. `INTEL_EGRESS` is reported honestly: `blocked` only if the compose network for the intel service is actually internal-only; otherwise `allowed` or `unknown`. A plain `podman compose up` (no profile) still starts only the app and exits 0.
+- Verify for real: `podman compose --profile intel up -d --build --force-recreate` exits 0; `curl /api/intel/health` through the app returns 200 with a model name, a record count above 6000, and a 64-hex checksum; a `POST /api/intel/query` for a term known to be in the corpus returns citations with finite coordinates; a nonsense question returns the fixed no-match answer with zero citations.
+
+---
+
+### Task 10: Browser end-to-end gate
+
+**Files:**
+- Create: `scripts/qa-starlight-intel.mjs`
+- Modify: `package.json` (`"qa:starlight-intel": "node scripts/qa-starlight-intel.mjs"`), `TESTING.md`
+
+Follow the existing `scripts/qa-*.mjs` convention exactly (see `scripts/qa-map-source-tray.mjs`): puppeteer with `puppeteer.executablePath()`, the platform-conditional ANGLE launch flags, `QA_BASE_URL` defaulting to `http://localhost:4173`, `QA_SHOTS_DIR`, a `failures` array, a non-zero exit code when any check fails, and captured console errors. Clear `localStorage` before the run so persisted layer state from an earlier session cannot fake a pass.
+
+**Checks — each records pass/fail with evidence, and the script prints a final table:**
+- E1. The app loads; the globe canvas exists with non-zero size; the Data Layers panel expands; an EXISTING layer (Submarine Cables — bundled, needs no key) toggles on and off without a console error. No console error mentions starlight, intel or lifecycle at any point in the run.
+- E2. "Starlight Local Intel" is listed in Data Layers.
+- E3. Toggling it on shows `#starlight-intel`; within 10s the status reads `Local` and the meta line shows the model name, `corpus`, an 8-character checksum, and the egress state.
+- E4. Asking a question known to match returns an answer and at least one citation button; clicking a citation changes the camera position (compare the camera's cartographic position before and after the flight).
+- E5. Toggling off hides the panel, and no request to `/api/intel/` is observed for 12 seconds.
+- E6. With the intel service stopped, the panel reports `Intel service unavailable`, the map still responds (an existing layer still toggles), and nothing throws. The script stops and restarts the service itself through `QA_CONTAINER_CLI` (default `podman`) against the compose service's container, and skips E6 with an explicit SKIPPED line — never a silent pass — if it cannot.
+- E7. With the layer on, the URL contains the layer token; reloading restores the panel visible.
+- E8. A question with no corpus match shows the fixed no-match answer and zero citations.
+- Layout. At 1200x900, 900x900 and 720x900 the panel's bounding rect overlaps none of: the command dock, `#left-panel-stack`, `#right-context-rail`, the title bar.
+
+---
+
 ## Verification checklist
 
 Phase 1 core is done when all of these hold:
