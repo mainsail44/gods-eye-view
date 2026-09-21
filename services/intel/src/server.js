@@ -43,7 +43,14 @@ const send = (res, status, payload) => {
   res.end(JSON.stringify(payload));
 };
 
-/** Rank corpus records by naive term overlap; sufficient before embeddings. */
+/**
+ * Rank corpus records by term overlap; sufficient before embeddings. Terms are
+ * weighted by how rare they are, because every datacenter record carries the
+ * words "nearest cable landing point": counting each match equally lets that
+ * boilerplate outvote the place name the question actually turns on. The
+ * weight stays strictly positive, so any matching term still counts as a
+ * match and an empty retrieval still means nothing matched at all.
+ */
 function retrieve(corpus, question, limit) {
   const rawTerms = String(question)
     .toLowerCase()
@@ -51,11 +58,22 @@ function retrieve(corpus, question, limit) {
     .filter(Boolean);
   const terms = [...new Set(rawTerms)].slice(0, MAX_QUERY_TERMS);
   if (!terms.length) return [];
+  const haystacks = corpus.map((record) =>
+    `${record.label ?? ''} ${record.text ?? ''}`.toLowerCase(),
+  );
+  const weights = terms.map((term) => {
+    const matches = haystacks.reduce(
+      (total, haystack) => total + (haystack.includes(term) ? 1 : 0),
+      0,
+    );
+    return Math.log(1 + corpus.length / (1 + matches));
+  });
   return corpus
-    .map((record) => {
-      const haystack = `${record.label ?? ''} ${record.text ?? ''}`.toLowerCase();
+    .map((record, index) => {
+      const haystack = haystacks[index];
       const score = terms.reduce(
-        (total, term) => total + (haystack.includes(term) ? 1 : 0),
+        (total, term, position) =>
+          total + (haystack.includes(term) ? weights[position] : 0),
         0,
       );
       return { record, score };

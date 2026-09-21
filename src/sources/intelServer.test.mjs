@@ -199,3 +199,54 @@ test('a question with more than 50 distinct terms still retrieves correctly', as
   const payload = JSON.parse(body);
   assert.equal(payload.citations[0].id, 'dc-1');
 });
+
+test('a rare term outranks boilerplate every record shares', async () => {
+  // Every datacenter record carries "nearest cable landing point", so the
+  // place name is the only term that separates them.
+  const text = (place) =>
+    `datacenters. nearest cable landing point: ${place} (2.0 km).`;
+  const handler = createIntelHandler({
+    corpus: [
+      {
+        id: 'dc-b',
+        label: 'Bravo',
+        lat: 53.4,
+        lon: 6.8,
+        text: text('Eemshaven, Netherlands'),
+      },
+      {
+        id: 'dc-c',
+        label: 'Charlie',
+        lat: 53.4,
+        lon: 6.9,
+        text: text('Eemshaven, Netherlands'),
+      },
+      {
+        id: 'dc-a',
+        label: 'Alpha',
+        lat: 43.3,
+        lon: 5.4,
+        text: text('Marseille, France'),
+      },
+    ],
+    model: 'local-model',
+    runtime: 'llama.cpp',
+    answer: async ({ records }) => ({
+      answer: `Matched ${records.length} record(s).`,
+      citations: records.map((record) => ({ id: record.id })),
+    }),
+  });
+  const { status, body } = await invoke(handler, {
+    method: 'POST',
+    url: '/query',
+    body: {
+      question: 'which datacenters are near the marseille landing point',
+      limit: 1,
+    },
+  });
+  assert.equal(status, 200);
+  assert.deepEqual(
+    JSON.parse(body).citations.map((citation) => citation.id),
+    ['dc-a'],
+  );
+});

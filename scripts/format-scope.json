@@ -755,5 +755,10 @@
   "src/director/interactions/interactions.test.mjs",
   "scripts/qa-director-interactions.mjs",
   "src/director/sharing/sharing.test.mjs",
-  "scripts/qa-director-sharing.mjs"
+  "scripts/qa-director-sharing.mjs",
+  "services/intel/src/buildCorpus.js",
+  "services/intel/scripts/build-corpus.mjs",
+  "services/intel/test/stub-runtime.mjs",
+  "src/sources/intelBuildCorpus.test.mjs",
+  "src/sources/intelStubRuntime.test.mjs"
 ]
