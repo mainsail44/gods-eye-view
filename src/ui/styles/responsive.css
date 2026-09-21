@@ -1,11 +1,19 @@
 /* ── Responsive ───────────────────────────────── */
-/* The centre lane the panel floats in exists only while both rails and the
-   panel itself fit side by side: 52 + 360 (left stack) + 360 (panel) + 330 +
-   52 (right rail) needs about 1160px. Below that the lane is too narrow — at
-   900px it is 106px wide — so the panel stops floating and becomes the first
-   entry in the right rail's own column instead. `order` rather than DOM
-   position: the shell moves the rail's panels around at startup. */
-@media (max-width: 1160px) {
+/* The centre lane the floating panel needs exists only above 1200px, and the
+   LEFT side is what binds. Measured in the browser, both rails collapsed and
+   expanded, 1140-1260px: #left-panel-stack's right edge is a constant 412px
+   (52px inset + its 360px width — it does not reflow above 720px) and
+   #right-context-rail's left edge is a constant W - 382. The card is 360px
+   wide and centred, so its edges are W/2 -/+ 180; matching the 8px of clear
+   air the verified 1200px layout has needs W/2 - 180 >= 420 on the left
+   (W >= 1200) and only W >= 1140 on the right. Sizing this lane off the right
+   rail alone put the breakpoint at 1160 and left 1161-1183px overlapping the
+   left stack outright. Below 1200 the panel stops floating and becomes the
+   first entry in the right rail's own column instead — `order` rather than DOM
+   position, because the shell moves the rail's panels around at startup.
+   1199.98px rather than 1199px so a fractional viewport width cannot land in
+   the gap between the two rules. */
+@media (max-width: 1199.98px) {
   #right-context-rail > .starlight-intel {
     position: relative;
     inset: auto;

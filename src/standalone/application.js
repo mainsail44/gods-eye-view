@@ -45,12 +45,13 @@ const intelTransport = {
 function createStarlightIntel(viewer, defer) {
   const element = document.getElementById('starlight-intel');
   if (!element) return undefined;
-  // Below about 1160px the centre lane between the two rails is narrower than
-  // the panel — 106px at 900px wide — and at 720px and under the HUD tiles the
-  // whole viewport, so there is nothing left to float over at all. Joining the
-  // right rail lets the stylesheet drop the panel into that rail's own column
-  // at those widths instead of overlapping it; above 1160px it stays fixed and
-  // centred, out of the rail's flow entirely. Layers already attach panels here
+  // Below 1200px the centre lane between the two rails no longer clears the
+  // left stack — the panel is 360px wide and centred, the stack's right edge a
+  // constant 412px — and at 720px and under the HUD tiles the whole viewport,
+  // so there is nothing left to float over at all. Joining the right rail lets
+  // the stylesheet drop the panel into that rail's own column at those widths
+  // instead of overlapping it; from 1200px up it stays fixed and centred, out
+  // of the rail's flow entirely. Layers already attach panels here
   // at runtime; see src/layers/launches/panel.js. Where it sits in the column
   // is decided by CSS `order`, not by this insertion point, because the shell
   // rearranges the rail's own panels during startup.
