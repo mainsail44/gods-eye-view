@@ -25,11 +25,16 @@ services:
       - '4173:4173'
     restart: unless-stopped
 
-  # Starlight Local Intel. Independent of the app service on purpose: the app
-  # must start and serve with this one down, and the proxy answers 503 while it
-  # is. The entrypoint reads ./corpus/corpus.json at startup, so until the
-  # corpus build lands this container exits immediately and restarts in a loop.
+  # Starlight Local Intel. Behind a profile because it needs a corpus baked
+  # into its image, which a later task produces: until then it has nothing to
+  # read and exits on startup, so a plain `podman compose up` must not start
+  # it. Opt in with `podman compose --profile intel up -d --build`.
+  #
+  # Independent of the app service on purpose — no depends_on, no shared
+  # volume. The app starts and serves with this one absent, and the proxy
+  # answers 503 with a reason while it is.
   starlight-intel:
+    profiles: ['intel']
     image: localhost/starlight-intel:latest
     build:
       context: .
@@ -37,6 +42,4 @@ services:
     env_file:
       - path: .env
         required: false
-    volumes:
-      - ./corpus:/app/corpus:ro
     restart: unless-stopped

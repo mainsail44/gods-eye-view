@@ -1,4 +1,22 @@
 /* ── Responsive ───────────────────────────────── */
+/* The centre lane the panel floats in exists only while both rails and the
+   panel itself fit side by side: 52 + 360 (left stack) + 360 (panel) + 330 +
+   52 (right rail) needs about 1160px. Below that the lane is too narrow — at
+   900px it is 106px wide — so the panel stops floating and becomes the first
+   entry in the right rail's own column instead. `order` rather than DOM
+   position: the shell moves the rail's panels around at startup. */
+@media (max-width: 1160px) {
+  #right-context-rail > .starlight-intel {
+    position: relative;
+    inset: auto;
+    order: -1;
+    flex: 0 0 auto;
+    width: 100%;
+    max-height: none;
+    transform: none;
+  }
+}
+
 @media (max-width: 720px) {
   #pp-toggles {
     --pp-expanded-width: 176px;
@@ -241,7 +259,11 @@
     text-align: center;
   }
 
-  /* The command dock stacks into two rows here; clear it and span the width. */
+  /* At this width the HUD tiles the viewport: the left stack owns the top
+     half, the right rail the bottom half down to the credit line, and the
+     command dock the floor. There is no lane to float a panel over. The real
+     placement is the right-rail rule in the 1160px block above; this is only
+     the fallback for a document that has no right rail to join. */
   .starlight-intel {
     right: 12px;
     bottom: calc(8px + 11rem);
