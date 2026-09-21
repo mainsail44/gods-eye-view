@@ -498,6 +498,7 @@
   "src/layers/cctv/source.test.mjs",
   "src/data/alprCameras.js",
   "src/data/alprCameras.test.mjs",
+  "src/data/dataCredits.test.mjs",
   "src/layers/alpr/index.js",
   "src/layers/alpr/model.js",
   "src/layers/alpr/policy.js",
@@ -762,5 +763,6 @@
   "src/sources/intelBuildCorpus.test.mjs",
   "src/sources/intelStubRuntime.test.mjs",
   "services/intel/src/egress.js",
-  "src/sources/intelEgress.test.mjs"
+  "src/sources/intelEgress.test.mjs",
+  "src/data/aisStreamSentinels.test.mjs"
 ]
