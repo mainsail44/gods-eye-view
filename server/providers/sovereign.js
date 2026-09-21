@@ -49,13 +49,25 @@ const readBody = (req) =>
     });
   });
 
+// A local model that reasons before answering is slow: a grounded question
+// against gemma4:e4b on a workstation GPU takes 20-60 s, so the old 10 s
+// budget turned a working answer into a 503. Override with
+// STARLIGHT_INTEL_TIMEOUT_MS when a runtime is faster or slower than that.
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+/** Positive, finite milliseconds from the environment, or the default. */
+function configuredTimeoutMs(value = process.env.STARLIGHT_INTEL_TIMEOUT_MS) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
+}
+
 /**
  * Bridge the browser to the intel service. An unreachable service is a
  * degraded state, not an error: the map keeps working without it.
  */
 export function createSovereignMiddleware({
   baseUrl = process.env.STARLIGHT_INTEL_URL || '',
-  timeoutMs = 10_000,
+  timeoutMs = configuredTimeoutMs(),
   fetchImpl = globalThis.fetch,
 } = {}) {
   return async function middleware(req, res, next) {

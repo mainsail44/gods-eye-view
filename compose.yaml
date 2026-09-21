@@ -21,18 +21,32 @@ services:
     environment:
       HOST: '0.0.0.0'
       PORT: '4173'
+      # Reached only from the server side, over the intel network. Harmless
+      # when the intel profile is not running: the proxy answers 503 with a
+      # reason and the map carries on.
+      STARLIGHT_INTEL_URL: ${STARLIGHT_INTEL_URL:-http://starlight-intel:8080}
     ports:
       - '4173:4173'
+    networks:
+      - default
+      - intel
     restart: unless-stopped
 
-  # Starlight Local Intel. Behind a profile because it needs a corpus baked
-  # into its image, which a later task produces: until then it has nothing to
-  # read and exits on startup, so a plain `podman compose up` must not start
-  # it. Opt in with `podman compose --profile intel up -d --build`.
+  # Starlight Local Intel. Behind a profile because it is an opt-in workload,
+  # not part of the map: a plain `podman compose up` must start the app alone.
+  # Opt in with `podman compose --profile intel up -d --build`.
   #
   # Independent of the app service on purpose — no depends_on, no shared
   # volume. The app starts and serves with this one absent, and the proxy
-  # answers 503 with a reason while it is.
+  # answers 503 with a reason while it is. The corpus is built into the image
+  # (see services/intel/Containerfile), so there is nothing to mount.
+  #
+  # Answers with the deterministic stub runtime by default. Point it at a real
+  # OpenAI-compatible runtime from .env alone — no edit to this file:
+  #
+  #   INTEL_RUNTIME_URL=http://host.containers.internal:11434
+  #   INTEL_MODEL=<the model your runtime has>
+  #   INTEL_RUNTIME=ollama
   starlight-intel:
     profiles: ['intel']
     image: localhost/starlight-intel:latest
@@ -42,4 +56,43 @@ services:
     env_file:
       - path: .env
         required: false
+    environment:
+      INTEL_CORPUS: /app/corpus/corpus.json
+      INTEL_MODEL: ${INTEL_MODEL:-starlight-stub}
+      INTEL_RUNTIME: ${INTEL_RUNTIME:-stub}
+      INTEL_RUNTIME_URL: ${INTEL_RUNTIME_URL:-http://intel-runtime-stub:11434}
+      # Measured at startup, never asserted: see services/intel/README.md.
+      INTEL_EGRESS: ${INTEL_EGRESS:-auto}
+    networks:
+      - intel
     restart: unless-stopped
+
+  # The deterministic stand-in for a model runtime. Same image as the service;
+  # it only runs a different entrypoint. Keeps the intel profile deployable
+  # and assertable with no GPU and no model download — and every answer it
+  # gives says it is a stub.
+  intel-runtime-stub:
+    profiles: ['intel']
+    image: localhost/starlight-intel:latest
+    build:
+      context: .
+      dockerfile: services/intel/Containerfile
+    command: ['node', '/app/services/intel/test/stub-runtime.mjs']
+    environment:
+      PORT: '11434'
+    networks:
+      - intel
+    restart: unless-stopped
+
+networks:
+  # The app keeps the ordinary bridge: it fetches live data from the internet.
+  default: {}
+  # Carries app -> intel and intel -> runtime traffic.
+  #
+  # Add `internal: true` here to cut this network off from everything outside
+  # it. The intel service then reports `egress: blocked` on /health because it
+  # measured it, and the model runtime must live inside this network — the
+  # stub does, a runtime on the host does not. Left routable by default so
+  # that pointing INTEL_RUNTIME_URL at a runtime on the host works without
+  # editing this file.
+  intel: {}

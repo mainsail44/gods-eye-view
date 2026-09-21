@@ -137,3 +137,40 @@ test('an oversized request body is rejected without reaching the service', async
   assert.equal(status, 413);
   assert.equal(called, false);
 });
+
+test('a slow local model is given a minute, and the budget is configurable', async () => {
+  // A reasoning model answers in tens of seconds; the default must not abort
+  // it, and an operator must be able to shorten or lengthen the wait.
+  const deadline = (options) =>
+    new Promise((resolve) => {
+      options.signal.addEventListener('abort', () => resolve('aborted'));
+    });
+  const slow = createSovereignMiddleware({
+    baseUrl: 'http://intel.local:8080',
+    fetchImpl: async (url, options) => {
+      // Resolve after a tick: the default budget must still be pending.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      assert.equal(options.signal.aborted, false);
+      return { ok: true, status: 200, json: async () => ({ model: 'slow' }) };
+    },
+  });
+  assert.equal((await invoke(slow, { url: '/health' })).status, 200);
+
+  const previous = process.env.STARLIGHT_INTEL_TIMEOUT_MS;
+  process.env.STARLIGHT_INTEL_TIMEOUT_MS = '5';
+  try {
+    const impatient = createSovereignMiddleware({
+      baseUrl: 'http://intel.local:8080',
+      fetchImpl: async (url, options) => {
+        await deadline(options);
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      },
+    });
+    const { status, body } = await invoke(impatient, { url: '/health' });
+    assert.equal(status, 503);
+    assert.match(JSON.parse(body).reason, /unreachable/i);
+  } finally {
+    if (previous === undefined) delete process.env.STARLIGHT_INTEL_TIMEOUT_MS;
+    else process.env.STARLIGHT_INTEL_TIMEOUT_MS = previous;
+  }
+});
