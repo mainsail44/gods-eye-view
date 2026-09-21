@@ -27,15 +27,35 @@ llama.cpp) and set three values in `.env`:
 INTEL_RUNTIME_URL=http://host.containers.internal:11434
 INTEL_MODEL=<a model your runtime has already pulled>
 INTEL_RUNTIME=ollama
+INTEL_REASONING_EFFORT=none
 ```
 
 Then `podman compose --profile intel up -d --force-recreate`. No file is
 edited and no image is rebuilt. `INTEL_RUNTIME_URL` is where your questions and
 the retrieved records are sent, so point it only at hardware you control.
 
-A model that reasons before it answers takes 20-60 seconds on a workstation
-GPU. The app waits 120 seconds by default; `STARLIGHT_INTEL_TIMEOUT_MS` changes
-that.
+### Latency
+
+A model that reasons before it answers spends most of its time reasoning, not
+retrieving: for a question over eight records, the prompt is about 660 tokens
+and the reply about 700, of which the visible answer is a fifth.
+
+`INTEL_REASONING_EFFORT` is sent as the standard OpenAI `reasoning_effort`
+field, and unset sends nothing at all, so a runtime that rejects unknown fields
+is unaffected. Measured against a local 4B model on a workstation GPU, same
+question, same eight records:
+
+| `reasoning_effort` | Warm latency | Completion tokens | Answer |
+| --- | --- | --- | --- |
+| unset | 79-83 s | ~700 | correct |
+| `none` | 21-36 s | 230-340 | correct |
+| `low` | 57 s | ~690 | correct |
+
+Capping `max_tokens` instead does not work: the reasoning consumes the budget
+and the response comes back empty with `finish_reason: length`.
+
+The app waits 120 seconds for an answer by default;
+`STARLIGHT_INTEL_TIMEOUT_MS` changes that.
 
 ## Configuration
 
@@ -46,6 +66,7 @@ that.
 | `INTEL_RUNTIME_URL` | OpenAI-compatible runtime base URL (Ollama, vLLM, llama.cpp) |
 | `INTEL_RUNTIME` | Runtime label reported by `/health` |
 | `INTEL_CORPUS` | Path to the corpus JSON array, default `/app/corpus/corpus.json` |
+| `INTEL_REASONING_EFFORT` | Sent as `reasoning_effort` when set; unset sends nothing |
 | `INTEL_EGRESS` | `auto` to measure it, or a fixed `blocked` / `allowed` / `unknown` |
 | `INTEL_EGRESS_PROBE` | `host:port` the `auto` check dials, default `1.1.1.1:443` |
 
@@ -54,9 +75,17 @@ Endpoints: `GET /health`, `POST /query`.
 ### What `egress` means
 
 `auto` makes the service open one TCP connection at startup to
-`INTEL_EGRESS_PROBE` and report `allowed` if it connects and `blocked` if it
-cannot. It is a measurement, not a promise: `blocked` means this container had
-no route to the public internet when it started.
+`INTEL_EGRESS_PROBE`, with a two-second timeout that cannot hold up startup. It
+is a measurement, not a promise: `blocked` means this container had no route to
+the public internet when it started.
+
+Only an inability to connect out reads as `blocked` — the connection refused,
+the host or network unreachable, the connection reset, or the attempt dropped
+in silence, which is what an egress firewall looks like from inside. A failure
+that says nothing about routing reads as `unknown` instead: a name that will
+not resolve, a socket the container is not permitted to open, or an error the
+service does not recognise. A machine without DNS is not a machine without
+egress, and `/health` should not claim otherwise.
 
 The compose network is routable by default, so a runtime on the host is
 reachable and `/health` reports `allowed`. For a deployment that is provably

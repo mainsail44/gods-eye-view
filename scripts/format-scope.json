@@ -760,5 +760,7 @@
   "services/intel/scripts/build-corpus.mjs",
   "services/intel/test/stub-runtime.mjs",
   "src/sources/intelBuildCorpus.test.mjs",
-  "src/sources/intelStubRuntime.test.mjs"
+  "src/sources/intelStubRuntime.test.mjs",
+  "services/intel/src/egress.js",
+  "src/sources/intelEgress.test.mjs"
 ]
