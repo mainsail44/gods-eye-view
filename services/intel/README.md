@@ -50,8 +50,16 @@ measured against a local 4B model on a workstation GPU:
 Both are defaults now. `INTEL_REASONING_EFFORT` is sent as the standard OpenAI
 `reasoning_effort` field and defaults to `none`; setting it to an empty string
 sends no such field at all, for a runtime that rejects it. The retrieval limit
-defaults to five records, because the model answers in proportion to what it is
-shown.
+defaults to five records, and `INTEL_MODEL_RECORDS` caps how many of them the
+model is shown however many the panel cites, because the model answers in
+proportion to what it is given.
+
+The system prompt matters as much as either. Asked for AWS sites it used to
+echo every record back with its id and coordinates — 22 s of output nobody
+reads, while the interface was already showing those records as clickable
+sources. It is now told to answer in at most three short sentences of plain
+prose, to name sites and distances, and never to print ids or coordinates. The
+same question answers in 6 s.
 
 Capping `max_tokens` instead does not work: the reasoning consumes the budget
 and the response comes back empty with `finish_reason: length`. Ollama's
@@ -76,6 +84,7 @@ The app waits 120 seconds for an answer by default;
 | `INTEL_CORPUS` | Path to the corpus JSON array, default `/app/corpus/corpus.json` |
 | `INTEL_REASONING_EFFORT` | Sent as `reasoning_effort`, default `none`; empty sends nothing |
 | `INTEL_KEEP_WARM_MS` | How often to nudge the runtime so the model stays loaded, default 240000 |
+| `INTEL_MODEL_RECORDS` | How many retrieved records the model is shown, default 5 |
 | `INTEL_EGRESS` | `auto` to measure it, or a fixed `blocked` / `allowed` / `unknown` |
 | `INTEL_EGRESS_PROBE` | `host:port` the `auto` check dials, default `1.1.1.1:443` |
 

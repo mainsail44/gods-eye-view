@@ -26,6 +26,25 @@ const REASONING_EFFORT = process.env.INTEL_REASONING_EFFORT ?? 'none';
  * to never ping.
  */
 const KEEP_WARM_MS = Number(process.env.INTEL_KEEP_WARM_MS ?? 240_000);
+/**
+ * How many records the model is shown, however many the panel cites. It
+ * answers in proportion to what it is given, and the citation list beneath the
+ * answer is what the operator actually clicks.
+ */
+const MODEL_RECORDS = Number(process.env.INTEL_MODEL_RECORDS ?? 5);
+
+/**
+ * The model's brief. Without the last three sentences it echoed every record
+ * back with its id and coordinates — a 94-second answer nobody could read,
+ * when the interface was already showing those records as clickable sources.
+ */
+const SYSTEM_PROMPT = [
+  'You answer questions about local infrastructure records.',
+  'Answer only from the records provided; never invent a location.',
+  'Reply in at most three short sentences of plain prose, naming the sites that matter and giving distances where they help.',
+  'Never list record ids or coordinates, and never repeat the records back: the interface already shows them as sources beneath your answer.',
+  'If the records do not answer the question, say so plainly in one sentence.',
+].join(' ');
 
 /** Exit with one readable line: a stack trace teaches a container operator nothing. */
 function fail(message) {
@@ -49,7 +68,9 @@ async function loadCorpus(file) {
     if (!Array.isArray(parsed)) throw new Error('expected a JSON array');
     return parsed;
   } catch (error) {
-    return fail(`the corpus at ${file} is not a usable JSON array: ${error.message}`);
+    return fail(
+      `the corpus at ${file} is not a usable JSON array: ${error.message}`,
+    );
   }
 }
 
@@ -69,12 +90,16 @@ const completionBody = (messages, extra = {}) =>
 
 const completionsUrl = () => intelUrl(RUNTIME_URL, '/v1/chat/completions');
 
+/** Questions in flight; the keep-warm ping stays out of their way. */
+let answering = 0;
+
 /**
  * Load the model before anyone asks, and keep it loaded. Fire and forget: it
  * never blocks startup or /health, and a runtime that is not up yet simply
  * gets tried again on the next tick.
  */
 function keepWarm() {
+  if (answering) return;
   fetch(completionsUrl(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -84,23 +109,25 @@ function keepWarm() {
 
 /** Ask the local runtime to answer strictly from the retrieved records. */
 async function answer({ question, records }) {
+  // No coordinates: the model has no use for them and printed them when given
+  // them. The id stays so an answer can be traced back to its record.
   const context = records
-    .map(
-      (record) =>
-        `- ${record.id}: ${record.label} (${record.lat}, ${record.lon}) ${record.text ?? ''}`,
-    )
+    .slice(0, MODEL_RECORDS)
+    .map((record) => `- ${record.id}: ${record.label} - ${record.text ?? ''}`)
     .join('\n');
+  answering += 1;
   const response = await fetch(completionsUrl(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: completionBody([
+      { role: 'system', content: SYSTEM_PROMPT },
       {
-        role: 'system',
-        content:
-          'Answer only from the records provided. If they do not contain the answer, say so. Never invent a location.',
+        role: 'user',
+        content: `Records:\n${context}\n\nQuestion: ${question}`,
       },
-      { role: 'user', content: `Records:\n${context}\n\nQuestion: ${question}` },
     ]),
+  }).finally(() => {
+    answering -= 1;
   });
   // A runtime that rejects the call (a model name it does not have, say) must
   // surface as an error, not as an empty answer bubble in the panel.
