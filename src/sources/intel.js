@@ -65,15 +65,19 @@ export function normalizeIntelAnswer(raw) {
   });
 }
 
-/** Build a bounded query body; a blank question is a programming error. */
-export function buildIntelQueryBody(question, { limit = 8 } = {}) {
+/**
+ * Build a bounded query body; a blank question is a programming error. Five
+ * records, not eight: a local model answers in proportion to what it is shown,
+ * and the three extra records doubled the wait for an answer nobody read.
+ */
+export function buildIntelQueryBody(question, { limit = 5 } = {}) {
   const trimmed = text(question, 500);
   if (!trimmed) throw new TypeError('A question is required');
-  // `Number(limit) || 8` would swallow a caller's explicit 0 and widen the
-  // request to 8; clamp a finite value instead, however small.
+  // `Number(limit) || 5` would swallow a caller's explicit 0 and widen the
+  // request to 5; clamp a finite value instead, however small.
   const requested = Number(limit);
   const bounded = Number.isFinite(requested)
     ? Math.min(50, Math.max(1, Math.trunc(requested)))
-    : 8;
+    : 5;
   return { question: trimmed, limit: bounded };
 }

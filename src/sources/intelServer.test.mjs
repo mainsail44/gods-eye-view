@@ -250,3 +250,102 @@ test('a rare term outranks boilerplate every record shares', async () => {
     ['dc-a'],
   );
 });
+
+/** A corpus shaped like the real one: same boilerplate, different places. */
+const rankingCorpus = () => [
+  {
+    id: 'dc-far',
+    kind: 'datacenter',
+    label: 'Lyon Interxion',
+    lat: 45.8,
+    lon: 4.8,
+    text: 'datacenters. name: Lyon Interxion. operator: Digital Realty. nearest cable landing point: Marseille, France (283.5 km).',
+    nearestKm: 283.5,
+  },
+  {
+    id: 'dc-near',
+    kind: 'datacenter',
+    label: 'Marseille Nedelec',
+    lat: 43.3,
+    lon: 5.4,
+    text: 'datacenters. name: Marseille Nedelec. operator: Equinix. nearest cable landing point: Marseille, France (1.1 km).',
+    nearestKm: 1.1,
+  },
+  {
+    id: 'dc-brondby',
+    kind: 'datacenter',
+    label: 'Brondby site',
+    lat: 55.6,
+    lon: 12.4,
+    text: 'datacenters. name: Brondby site. operator: Interxion. nearest cable landing point: Brondby, Denmark (2.0 km).',
+    nearestKm: 2,
+  },
+  {
+    id: 'lp-marseille-france',
+    kind: 'landing-point',
+    label: 'Marseille, France',
+    lat: 43.3,
+    lon: 5.3,
+    text: 'submarine cable landing points. name: Marseille, France.',
+  },
+];
+
+const citationIds = async (corpus, question, limit) => {
+  const handler = createIntelHandler({
+    corpus,
+    model: 'local-model',
+    runtime: 'llama.cpp',
+    answer: async ({ records }) => ({
+      answer: '',
+      citations: records.map((record) => ({ id: record.id })),
+    }),
+  });
+  const { body } = await invoke(handler, {
+    method: 'POST',
+    url: '/query',
+    body: { question, limit },
+  });
+  return JSON.parse(body).citations.map((citation) => citation.id);
+};
+
+test('"near" means near: tied records are ordered by stored distance', async () => {
+  // Both Marseille datacenters match exactly the same terms. Without the
+  // distance the 283 km one came first, purely because of its id.
+  assert.deepEqual(
+    await citationIds(
+      rankingCorpus(),
+      'which datacenters are near the Marseille landing point?',
+      2,
+    ),
+    ['dc-near', 'dc-far'],
+  );
+});
+
+test('a term only matches whole words, so "by" is not inside "Brondby"', async () => {
+  // "operated" and "by" are noise; matching them as substrings once buried
+  // every Equinix record under sites whose town happens to contain "by".
+  assert.deepEqual(
+    await citationIds(rankingCorpus(), 'datacenters operated by Equinix', 1),
+    ['dc-near'],
+  );
+});
+
+test('a question of nothing but stopwords retrieves nothing', async () => {
+  const ids = await citationIds(rankingCorpus(), 'which are the ones in at of');
+  assert.deepEqual(ids, []);
+});
+
+test('singular and plural still find each other', async () => {
+  const ids = await citationIds(rankingCorpus(), 'datacenter', 4);
+  assert.equal(ids.length, 3, 'all three datacenters, not the landing point');
+  assert.ok(!ids.includes('lp-marseille-france'));
+  assert.deepEqual(
+    await citationIds(rankingCorpus(), 'submarine cable landing point', 1),
+    ['lp-marseille-france'],
+  );
+});
+
+test('the place itself outranks a datacenter it would otherwise tie with', async () => {
+  const ids = await citationIds(rankingCorpus(), 'landing points in France', 2);
+  assert.equal(ids[0], 'lp-marseille-france');
+});

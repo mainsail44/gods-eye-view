@@ -61,10 +61,11 @@ services:
       INTEL_MODEL: ${INTEL_MODEL:-starlight-stub}
       INTEL_RUNTIME: ${INTEL_RUNTIME:-stub}
       INTEL_RUNTIME_URL: ${INTEL_RUNTIME_URL:-http://intel-runtime-stub:11434}
-      # Empty by default, so nothing is sent and a runtime that rejects
-      # unknown fields is unaffected. `none` roughly halves the wait on a
-      # model that reasons before it answers.
-      INTEL_REASONING_EFFORT: ${INTEL_REASONING_EFFORT:-}
+      # A model that reasons before answering spends most of its time there,
+      # so ask it not to. Override with `low`, `medium` or `high`.
+      INTEL_REASONING_EFFORT: ${INTEL_REASONING_EFFORT:-none}
+      # Nudge the runtime this often so the model stays loaded; 0 never pings.
+      INTEL_KEEP_WARM_MS: ${INTEL_KEEP_WARM_MS:-240000}
       # Measured at startup, never asserted: see services/intel/README.md.
       INTEL_EGRESS: ${INTEL_EGRESS:-auto}
     networks:

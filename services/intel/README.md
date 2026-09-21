@@ -37,22 +37,30 @@ the retrieved records are sent, so point it only at hardware you control.
 ### Latency
 
 A model that reasons before it answers spends most of its time reasoning, not
-retrieving: for a question over eight records, the prompt is about 660 tokens
-and the reply about 700, of which the visible answer is a fifth.
+retrieving. The prompt is small — 593 tokens for a question over eight records
+— and the reply was the cost. Two settings account for almost all of the wait,
+measured against a local 4B model on a workstation GPU:
 
-`INTEL_REASONING_EFFORT` is sent as the standard OpenAI `reasoning_effort`
-field, and unset sends nothing at all, so a runtime that rejects unknown fields
-is unaffected. Measured against a local 4B model on a workstation GPU, same
-question, same eight records:
+| Setting | Warm latency | Completion tokens |
+| --- | --- | --- |
+| eight records, no `reasoning_effort` | 79-83 s | ~700 |
+| eight records, `reasoning_effort: none` | 17 s | 199 |
+| five records, `reasoning_effort: none` | 4-7 s | ~110 |
 
-| `reasoning_effort` | Warm latency | Completion tokens | Answer |
-| --- | --- | --- | --- |
-| unset | 79-83 s | ~700 | correct |
-| `none` | 21-36 s | 230-340 | correct |
-| `low` | 57 s | ~690 | correct |
+Both are defaults now. `INTEL_REASONING_EFFORT` is sent as the standard OpenAI
+`reasoning_effort` field and defaults to `none`; setting it to an empty string
+sends no such field at all, for a runtime that rejects it. The retrieval limit
+defaults to five records, because the model answers in proportion to what it is
+shown.
 
 Capping `max_tokens` instead does not work: the reasoning consumes the budget
-and the response comes back empty with `finish_reason: length`.
+and the response comes back empty with `finish_reason: length`. Ollama's
+`think: false` is accepted over the OpenAI-compatible endpoint and ignored, and
+so is `keep_alive` — which is why the service keeps the model resident itself,
+with one tiny completion at startup and another every `INTEL_KEEP_WARM_MS`
+(240 s by default, inside Ollama's five-minute idle eviction; 0 never pings).
+Those requests are fire-and-forget: they never block startup or `/health`, and
+a runtime that is not up yet is simply tried again.
 
 The app waits 120 seconds for an answer by default;
 `STARLIGHT_INTEL_TIMEOUT_MS` changes that.
@@ -66,7 +74,8 @@ The app waits 120 seconds for an answer by default;
 | `INTEL_RUNTIME_URL` | OpenAI-compatible runtime base URL (Ollama, vLLM, llama.cpp) |
 | `INTEL_RUNTIME` | Runtime label reported by `/health` |
 | `INTEL_CORPUS` | Path to the corpus JSON array, default `/app/corpus/corpus.json` |
-| `INTEL_REASONING_EFFORT` | Sent as `reasoning_effort` when set; unset sends nothing |
+| `INTEL_REASONING_EFFORT` | Sent as `reasoning_effort`, default `none`; empty sends nothing |
+| `INTEL_KEEP_WARM_MS` | How often to nudge the runtime so the model stays loaded, default 240000 |
 | `INTEL_EGRESS` | `auto` to measure it, or a fixed `blocked` / `allowed` / `unknown` |
 | `INTEL_EGRESS_PROBE` | `host:port` the `auto` check dials, default `1.1.1.1:443` |
 
@@ -103,12 +112,26 @@ node services/intel/scripts/build-corpus.mjs --out /tmp/corpus.json
 ```
 
 6,268 records: 4,351 datacenters and 1,917 submarine cable landing points. Each
-record is `{ id, kind, label, lat, lon, text, source }`. Retrieval is term
-overlap over `label` and `text`, weighted towards rare terms, so `text` carries
-what an operator would ask about — including, for every datacenter, the nearest
-cable landing point and its great-circle distance, computed at build time. That
-precomputed join is what lets "which datacenters are near the Marseille landing
-point" be answered without a geospatial query.
+record is `{ id, kind, label, lat, lon, text, source }`, and a datacenter also
+carries `nearestKm`. `text` holds what an operator would ask about — including,
+for every datacenter, the nearest cable landing point and its great-circle
+distance, computed at build time. That precomputed join is what lets "which
+datacenters are near the Marseille landing point" be answered without a
+geospatial query.
+
+### How retrieval ranks
+
+Records are indexed once at startup into tokens, and a question's terms match a
+token when either is a prefix of the other — so datacenter finds datacenters,
+but `by` no longer matches the middle of "Brondby". Terms are weighted by how
+rare they are, and a short list of words that separate nothing (the, of, by,
+near, operated, which) neither match nor count.
+
+Records that tie are ordered by `nearestKm`. Every datacenter whose nearest
+landing point is Marseille matches exactly the same terms, so without that
+"near the Marseille landing point" answered with sites 300 km away. A landing
+point has no distance and sorts as if at zero: it is the place being asked
+about, so it comes ahead of a datacenter it would otherwise tie with.
 
 The build is deterministic: the same inputs produce byte-identical output, so
 the checksum on `/health` identifies the data and not the build. The generated

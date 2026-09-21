@@ -58,25 +58,40 @@ function meanPosition(positions) {
  * Shoelace centroid of one ring, with its signed area. Degenerate rings (a
  * repeated point, two points, zero area) give area 0 and are handled by the
  * caller rather than producing NaN here.
+ *
+ * The sum runs relative to the ring's first vertex. On raw lon/lat the cross
+ * products of a small building are differences of numbers near 100, and the
+ * cancellation pushed some centroids hundreds of metres outside their own
+ * footprint — which matters, because the camera flies to these coordinates.
  */
 function ringCentroid(ring) {
   if (!Array.isArray(ring)) return null;
   const points = ring.map(position).filter(Boolean);
   if (points.length < 3) return null;
+  const origin = points[0];
   let twiceArea = 0;
   let lon = 0;
   let lat = 0;
   for (let index = 0; index < points.length; index += 1) {
     const current = points[index];
     const next = points[(index + 1) % points.length];
-    const cross = current.lon * next.lat - next.lon * current.lat;
+    const currentLon = current.lon - origin.lon;
+    const currentLat = current.lat - origin.lat;
+    const nextLon = next.lon - origin.lon;
+    const nextLat = next.lat - origin.lat;
+    const cross = currentLon * nextLat - nextLon * currentLat;
     twiceArea += cross;
-    lon += (current.lon + next.lon) * cross;
-    lat += (current.lat + next.lat) * cross;
+    lon += (currentLon + nextLon) * cross;
+    lat += (currentLat + nextLat) * cross;
   }
   const area = twiceArea / 2;
   if (!Number.isFinite(area) || area === 0) return { area: 0, points };
-  return { area, lon: lon / (6 * area), lat: lat / (6 * area), points };
+  return {
+    area,
+    lon: origin.lon + lon / (6 * area),
+    lat: origin.lat + lat / (6 * area),
+    points,
+  };
 }
 
 /** Outer rings of a Polygon or MultiPolygon; holes do not move the centroid enough to matter here. */
@@ -216,6 +231,9 @@ function datacenterRecord(feature, landingPoints) {
         nearest &&
           `nearest cable landing point: ${nearest.record.label} (${nearest.km.toFixed(1)} km)`,
       ]),
+      // The same distance as a number, because "near" has to mean near: the
+      // retriever ranks records that match the same landing point by it.
+      ...(nearest ? { nearestKm: round(nearest.km, 1) } : {}),
       source: DATACENTER_SOURCE,
     },
   };

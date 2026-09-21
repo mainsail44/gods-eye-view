@@ -63,7 +63,7 @@ test('an empty answer is preserved rather than invented', () => {
 test('builds a bounded query body', () => {
   assert.deepEqual(buildIntelQueryBody('  where are the cables?  '), {
     question: 'where are the cables?',
-    limit: 8,
+    limit: 5,
   });
   assert.equal(buildIntelQueryBody('q', { limit: 999 }).limit, 50);
   assert.equal(buildIntelQueryBody('q', { limit: 0 }).limit, 1);

@@ -256,3 +256,51 @@ test('coordinates are rounded to a fixed precision and never negative zero', () 
   assert.ok(Object.is(record.lat, 0));
   assert.equal(JSON.stringify(record.lat), '0');
 });
+
+test('a tiny footprint far from the origin centres inside itself', () => {
+  // The real Flexential Las Vegas building: 12.9 m across at longitude -115.
+  // Summing the shoelace terms on raw lon/lat cancelled badly enough to put
+  // this centroid 595 m outside its own walls, and the camera flies here.
+  const ring = [
+    [-115.143190402, 36.168619082],
+    [-115.143144721, 36.168688233],
+    [-115.143098704, 36.168668451],
+    [-115.143144469, 36.168599217],
+    [-115.143190402, 36.168619082],
+  ];
+  const point = centroid({ type: 'Polygon', coordinates: [ring] });
+  const lons = ring.map(([lon]) => lon);
+  const lats = ring.map(([, lat]) => lat);
+  assert.ok(
+    point.lon >= Math.min(...lons) && point.lon <= Math.max(...lons),
+    `lon ${point.lon} outside the footprint`,
+  );
+  assert.ok(
+    point.lat >= Math.min(...lats) && point.lat <= Math.max(...lats),
+    `lat ${point.lat} outside the footprint`,
+  );
+  assert.ok(
+    haversineKm(
+      { lat: point.lat, lon: point.lon },
+      { lat: 36.168644, lon: -115.143145 },
+    ) < 0.005,
+    'centroid moved away from the building',
+  );
+});
+
+test('a datacenter carries its landing-point distance as a number', () => {
+  const records = buildCorpusRecords({
+    datacenters: [
+      datacenter(1, square(-0.001, 0.999, 0.002), { name: 'Close' }),
+      datacenter(2, square(9.999, 0.999, 0.002), { name: 'Far' }),
+    ],
+    landingPoints: [landingPoint('p', 'Near Place, Nowhere', [0, 0])],
+  });
+  const [close, far, landing] = records;
+  assert.equal(close.nearestKm, 111.2);
+  assert.match(close.text, /\(111\.2 km\)/);
+  assert.ok(far.nearestKm > close.nearestKm);
+  // The place itself has no distance: it is what the others are measured from.
+  assert.equal(landing.kind, 'landing-point');
+  assert.equal('nearestKm' in landing, false);
+});
