@@ -204,3 +204,214 @@ test('missing markup is a construction error, not a silent no-op', () => {
     /missing \[data-intel-citations\]/,
   );
 });
+
+test('a repaint with the same answer keeps the citation buttons in place', () => {
+  const { element, nodes } = fixture();
+  const view = createStarlightIntelView({ element });
+  const answer = normalizeIntelAnswer({
+    answer: 'One site matches.',
+    citations: [
+      { id: 'dc-1', label: 'Ashburn campus', lat: 39.04, lon: -77.49 },
+    ],
+  });
+  view.render({ enabled: true, health: HEALTHY, answer, status: 'Local' });
+  const list = nodes['[data-intel-citations]'];
+  const before = list.children[0];
+
+  // The health poll repaints every few seconds with the same answer object;
+  // a click or keyboard focus on a citation must survive that repaint.
+  view.render({ enabled: true, health: HEALTHY, answer, status: 'Local' });
+  assert.equal(list.children[0], before);
+
+  // A genuinely new answer still rebuilds the list.
+  const next = normalizeIntelAnswer({ answer: 'None.', citations: [] });
+  view.render({
+    enabled: true,
+    health: HEALTHY,
+    answer: next,
+    status: 'Local',
+  });
+  assert.equal(list.children.length, 0);
+});
+
+// --- The reading line, citation details and the trace.
+
+import {
+  describeIntelReading,
+  describeIntelCitation,
+  describeIntelStep,
+} from './starlightIntelView.js';
+
+function fullFixture() {
+  const { element, nodes } = fixture();
+  nodes['[data-intel-reading]'] = makeNode('p');
+  nodes['[data-intel-trace]'] = makeNode('ol');
+  return { element, nodes };
+}
+
+test('the reading line says where the question was placed', () => {
+  assert.equal(
+    describeIntelReading({
+      reading: {
+        place: 'Woodbridge',
+        region: 'Virginia',
+        entityType: 'datacenter',
+        operator: '',
+        radiusKm: 0,
+      },
+      place: {
+        name: 'Woodbridge',
+        region: 'Virginia',
+        country: 'United States',
+        radiusKm: 0,
+        confidence: 'exact',
+      },
+    }),
+    'Placed Woodbridge, Virginia, United States · datacenters',
+  );
+  assert.equal(
+    describeIntelReading({
+      reading: {
+        place: 'Atlantis',
+        region: '',
+        country: '',
+        entityType: 'any',
+        operator: 'Equinix',
+        radiusKm: 50,
+      },
+      place: null,
+    }),
+    'Read as Atlantis, not in the gazetteer · Equinix · within 50 km',
+  );
+  assert.equal(
+    describeIntelReading({
+      reading: {
+        place: '',
+        region: 'Virginia',
+        entityType: 'any',
+        operator: '',
+      },
+      place: {
+        name: 'Virginia',
+        region: 'Virginia',
+        country: 'United States',
+        radiusKm: 443,
+        confidence: 'ambiguous',
+      },
+    }),
+    'Assumed Virginia, Virginia, United States (±443 km)',
+  );
+  assert.equal(describeIntelReading({ reading: {}, place: null }), '');
+});
+
+test('a citation detail names its town and distance, and a step its timing', () => {
+  assert.equal(
+    describeIntelCitation({
+      kind: 'datacenter',
+      city: 'Sterling',
+      region: 'Virginia',
+      why: { km: 44.1 },
+    }),
+    'Sterling, Virginia · 44.1 km',
+  );
+  assert.equal(
+    describeIntelCitation({
+      kind: 'landing-point',
+      country: 'France',
+      why: {},
+    }),
+    'landing point · France',
+  );
+  assert.equal(
+    describeIntelStep({ step: 'read', ms: 2400, detail: 'Woodbridge' }),
+    'Read 2.4 s · Woodbridge',
+  );
+  assert.equal(
+    describeIntelStep({ step: 'retrieve', ms: 3, detail: '' }),
+    'Retrieve 3 ms',
+  );
+});
+
+test('reading and trace nodes are painted when present and hidden when empty', () => {
+  const { element, nodes } = fullFixture();
+  const view = createStarlightIntelView({ element });
+  const answer = normalizeIntelAnswer({
+    answer: 'STACK NVA01A is nearest.',
+    citations: [
+      {
+        id: 'dc-1',
+        label: 'STACK NVA01A',
+        kind: 'datacenter',
+        lat: 39,
+        lon: -77.4,
+        city: 'Sterling',
+        region: 'Virginia',
+        why: { km: 44.1 },
+      },
+    ],
+    reading: {
+      place: 'Woodbridge',
+      region: 'Virginia',
+      entityType: 'datacenter',
+    },
+    place: {
+      kind: 'place',
+      name: 'Woodbridge',
+      region: 'Virginia',
+      country: 'United States',
+      lat: 38.66,
+      lon: -77.25,
+    },
+    trace: [
+      { step: 'read', ms: 2400, detail: 'Woodbridge, Virginia' },
+      { step: 'answer', ms: 3100, detail: 'gemma4:12b · 1 records used' },
+    ],
+  });
+  view.render({ enabled: true, health: HEALTHY, answer, status: 'Local' });
+  assert.equal(nodes['[data-intel-reading]'].hidden, false);
+  assert.match(
+    nodes['[data-intel-reading]'].textContent,
+    /^Placed Woodbridge, Virginia, United States/,
+  );
+  assert.equal(nodes['[data-intel-trace]'].hidden, false);
+  assert.deepEqual(
+    nodes['[data-intel-trace]'].children.map((item) => item.textContent),
+    ['Read 2.4 s', 'Answer 3.1 s'],
+    'timings on the strip',
+  );
+  assert.deepEqual(
+    nodes['[data-intel-trace]'].children.map((item) => item.title),
+    ['Woodbridge, Virginia', 'gemma4:12b · 1 records used'],
+    'details a hover away',
+  );
+  const [item] = nodes['[data-intel-citations]'].children;
+  assert.equal(item.children[1].tagName, 'small');
+  assert.equal(item.children[1].textContent, 'Sterling, Virginia · 44.1 km');
+
+  view.render({
+    enabled: true,
+    health: HEALTHY,
+    answer: normalizeIntelAnswer(null),
+    status: 'Local',
+  });
+  assert.equal(nodes['[data-intel-reading]'].hidden, true);
+  assert.equal(nodes['[data-intel-trace]'].hidden, true);
+  assert.deepEqual(nodes['[data-intel-trace]'].children, []);
+});
+
+test('health describes the vector index once it is ready', () => {
+  const indexing = normalizeIntelHealth({
+    model: 'm',
+    corpus: { version: 'v' },
+    egress: 'blocked',
+    embeddings: { model: 'embeddinggemma', ready: false, indexed: 500 },
+  });
+  assert.match(describeIntelHealth(indexing), /vectors indexing 500/);
+  const ready = normalizeIntelHealth({
+    model: 'm',
+    corpus: { version: 'v' },
+    egress: 'blocked',
+    embeddings: { model: 'embeddinggemma', ready: true, indexed: 6268 },
+  });
+  assert.match(describeIntelHealth(ready), /vectors embeddinggemma/);
+});

@@ -390,3 +390,30 @@ test('first ask rejects late after second resolved — second answer preserved',
   assert.equal(panel.state().status, goodStatus);
   panel.disable();
 });
+
+test('the whole answer reaches the host before its citations, and the empty answer on disable', async () => {
+  const events = [];
+  const panel = createStarlightIntelPanel({
+    transport: {
+      health: async () => ({ model: 'm' }),
+      query: async () => ({
+        answer: 'two sites',
+        citations: [
+          { id: 'dc-1', lat: 1, lon: 2 },
+          { id: 'dc-2', lat: 3, lon: 4 },
+        ],
+        actions: [{ type: 'frame', ids: ['dc-1', 'dc-2'] }],
+      }),
+    },
+    onAnswer: (answer) =>
+      events.push(
+        `answer:${answer.citations.length}:${answer.actions.map((a) => a.type).join(',')}`,
+      ),
+    onCite: (cite) => events.push(`cite:${cite.id}`),
+  });
+  panel.enable();
+  await panel.ask('where');
+  assert.deepEqual(events, ['answer:2:frame', 'cite:dc-1', 'cite:dc-2']);
+  panel.disable();
+  assert.deepEqual(events.at(-1), 'answer:0:');
+});

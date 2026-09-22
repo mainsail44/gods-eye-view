@@ -478,3 +478,68 @@ body.ui-clean-view .starlight-intel,
 body.recording-mode .starlight-intel {
   display: none;
 }
+
+/* How the question was read and where it was placed; the model's working. */
+.starlight-intel-reading {
+  margin: 8px 0 0;
+  padding: 4px 8px;
+  border-left: 2px solid rgba(124, 255, 178, 0.7);
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.starlight-intel-citation-detail {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+
+/* The pipeline's steps with timings: read, place, retrieve, answer. */
+.starlight-intel-trace {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  margin: 10px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid var(--glass-border);
+  list-style: none;
+  color: var(--text-dim);
+  font-size: 10.5px;
+}
+
+.starlight-intel-step {
+  position: relative;
+  padding-left: 12px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.starlight-intel-step::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-dim);
+}
+
+.starlight-intel-step-read::before {
+  background: #c8f7ff;
+}
+
+.starlight-intel-step-resolve::before {
+  background: #7cffb2;
+}
+
+.starlight-intel-step-retrieve::before {
+  background: #38d9ff;
+}
+
+.starlight-intel-step-answer::before {
+  background: #ffb347;
+}

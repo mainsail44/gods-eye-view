@@ -1,5 +1,34 @@
 # Changelog
 
+- Make Starlight Local Intel read the question before it retrieves. The
+  local model now extracts the place, kind of record, operator and intent as
+  JSON; a vendored GeoNames gazetteer resolves the place to a coordinate
+  offline; and retrieval fuses distance to that place, embedding similarity
+  (a vector index built by the runtime and cached in a compose volume) and
+  term overlap. Every corpus record is labelled with its nearest town, region
+  and country at build time. The model then answers as JSON that names the
+  records it relied on and how the globe should frame them, so an answer
+  draws its citations and the resolved place on the globe and moves the
+  camera once, to one site or framing them all. The panel shows how the
+  question was read, where it was placed, each citation's town and distance,
+  and the pipeline's steps with timings. The deterministic stub runtime
+  serves embeddings and schema-shaped answers so the GPU-free profile still
+  exercises the whole path. "What datacenters are in Woodbridge, Virginia"
+  now answers with the Northern Virginia sites and their distances instead
+  of a Cornish record whose name began with "Virgin".
+
+- Fly a Starlight Local Intel citation so the cited site is in the frame.
+  The flight stood the camera directly above the site and pitched it down,
+  which left the site behind the bottom edge of the frame and centred an
+  anonymous patch of ground 3 km north of it. The camera now stands off
+  along its line of sight and frames the site in the upper third, above the
+  centred panel. Citation buttons are rebuilt only when a new answer lands,
+  not on every health poll, so a click no longer straddles a repaint.
+
+- Match a Starlight Local Intel query term only to itself or its plural. A
+  prefix rule meant to pair datacenter/datacenters let "Virginia" retrieve
+  "Virgin Media".
+
 - Enable responsive trackpad pinch zoom on the globe. Browser pixel-mode
   `Ctrl+wheel` pinch gestures now reach Cesium with bounded amplification,
   while ordinary wheel, line-mode and touch-pinch inputs retain their existing

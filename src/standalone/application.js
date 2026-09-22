@@ -8,6 +8,7 @@ import { createStandaloneData } from './data.js';
 import { createStandaloneTools } from './tools.js';
 import { createStarlightIntelPanel } from '../ui/starlightIntel.js';
 import { createStarlightIntelView } from '../ui/starlightIntelView.js';
+import { createStarlightIntelScene } from '../ui/starlightIntelScene.js';
 import { flyToCoordinate } from '../camera.js';
 
 // The existing controls and layer catalog contain page-scoped state.
@@ -35,9 +36,10 @@ const intelTransport = {
 
 /**
  * Bind the Starlight Local Intel markup to a panel the catalog layer drives.
- * The camera flight belongs to the click, not to the answer: the panel's
- * `onCite` fires once per citation the moment an answer lands, so driving the
- * camera from it would race eight flights against each other for one question.
+ * An answer is drawn on the globe as a whole — markers for its citations, a
+ * ring around the place it resolved, one camera move the service proposed —
+ * and a click on a citation flies to that site. The camera is never driven
+ * from `onCite`, which fires once per citation and would race the flights.
  * @param {object} viewer Cesium viewer supplying the camera.
  * @param {Function} defer Registers teardown with the owning component.
  * @returns {object|undefined} The panel, when the markup is present.
@@ -57,16 +59,27 @@ function createStarlightIntel(viewer, defer) {
   // rearranges the rail's own panels during startup.
   document.getElementById('right-context-rail')?.prepend(element);
   let panel;
+  const scene = createStarlightIntelScene({ viewer });
   const view = createStarlightIntelView({
     element,
     onAsk: (question) => void panel.ask(question),
-    onCiteClick: (citation) => flyToCoordinate(viewer, citation),
+    onCiteClick: (citation) => {
+      scene.focus(citation.id);
+      flyToCoordinate(viewer, citation);
+    },
   });
   panel = createStarlightIntelPanel({
     transport: intelTransport,
     onRender: (state) => view.render(state),
+    onAnswer: (answer) => {
+      scene.show(answer);
+      scene.act(answer.actions);
+    },
   });
-  defer(() => panel.disable());
+  defer(() => {
+    panel.disable();
+    scene.destroy();
+  });
   view.render(panel.state());
   return panel;
 }

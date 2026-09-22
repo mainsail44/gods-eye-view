@@ -10,12 +10,15 @@ const EMPTY = normalizeIntelAnswer(null);
 /**
  * Behavior of the Starlight Local Intel component. Disabled is genuinely off:
  * polling stops, in-flight work aborts, and nothing reaches the network.
+ * `onAnswer` receives every settled answer (and the empty one on disable) so
+ * the host can draw it on the globe; `onCite` still fires per citation.
  */
 export function createStarlightIntelPanel({
   transport,
   pollMs = 5_000,
   onRender = () => {},
   onCite = () => {},
+  onAnswer = () => {},
 }) {
   let enabled = false;
   let timer = null;
@@ -72,6 +75,7 @@ export function createStarlightIntelPanel({
       health = OFFLINE;
       answer = EMPTY;
       status = 'Disabled';
+      onAnswer(answer);
       render();
     },
 
@@ -98,6 +102,9 @@ export function createStarlightIntelPanel({
         if (mine !== generation || queryController !== myController) return;
         answer = result;
         status = health.ok ? 'Local' : 'Local (health unknown)';
+        // The whole answer first — markers and the camera move once — then
+        // each citation for hosts that track them individually.
+        onAnswer(answer);
         for (const cite of answer.citations) onCite(cite);
         if (queryController === myController) queryController = null;
       } catch {
