@@ -68,6 +68,15 @@ services:
       INTEL_KEEP_WARM_MS: ${INTEL_KEEP_WARM_MS:-240000}
       # Measured at startup, never asserted: see services/intel/README.md.
       INTEL_EGRESS: ${INTEL_EGRESS:-auto}
+      # The model that reads each question before retrieval (place, kind,
+      # operator, intent). Defaults to the answering model; empty skips it.
+      INTEL_READER_MODEL: ${INTEL_READER_MODEL:-${INTEL_MODEL:-starlight-stub}}
+      # The embedding model behind the vector index; empty disables vectors.
+      # The stub runtime embeds deterministically under any name.
+      INTEL_EMBED_MODEL: ${INTEL_EMBED_MODEL:-starlight-stub-embed}
+    volumes:
+      # The vector index, embedded once per corpus and model and reused.
+      - intel-cache:/app/cache
     networks:
       - intel
     restart: unless-stopped
@@ -88,6 +97,9 @@ services:
     networks:
       - intel
     restart: unless-stopped
+
+volumes:
+  intel-cache: {}
 
 networks:
   # The app keeps the ordinary bridge: it fetches live data from the internet.

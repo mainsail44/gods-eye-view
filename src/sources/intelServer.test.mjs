@@ -349,3 +349,314 @@ test('the place itself outranks a datacenter it would otherwise tie with', async
   const ids = await citationIds(rankingCorpus(), 'landing points in France', 2);
   assert.equal(ids[0], 'lp-marseille-france');
 });
+
+test('a place name does not retrieve a record that merely begins with it', async () => {
+  // "Virginia" once matched "Virgin Media" — a record in Cornwall — because
+  // a term matched any token it was a prefix of. Only plural suffixes may differ.
+  const corpus = [
+    ...rankingCorpus(),
+    {
+      id: 'dc-virgin-media',
+      kind: 'datacenter',
+      label: 'Virgin Media',
+      lat: 50.07,
+      lon: -5.68,
+      text: 'datacenters. name: Virgin Media. nearest cable landing point: Skewjack (0.6 km).',
+      nearestKm: 0.6,
+    },
+    {
+      id: 'dc-nova',
+      kind: 'datacenter',
+      label: 'STACK NVA01A - Northern Virginia',
+      lat: 39.0,
+      lon: -77.44,
+      text: 'datacenters. name: STACK NVA01A - Northern Virginia. nearest cable landing point: Virginia Beach (250.0 km).',
+      nearestKm: 250,
+    },
+  ];
+  assert.deepEqual(await citationIds(corpus, 'Virginia', 5), ['dc-nova']);
+  assert.deepEqual(await citationIds(corpus, 'Virgin', 5), ['dc-virgin-media']);
+});
+
+// --- The AI-native pipeline: reader, gazetteer, vectors and camera actions.
+
+import { deriveActions } from '../../services/intel/src/server.js';
+
+const query = async (handler, question, limit = 5) => {
+  const { body } = await invoke(handler, {
+    method: 'POST',
+    url: '/query',
+    body: { question, limit },
+  });
+  return JSON.parse(body);
+};
+
+const VIRGINIA_CORPUS = () => [
+  ...rankingCorpus(),
+  {
+    id: 'dc-stack',
+    kind: 'datacenter',
+    label: 'STACK NVA01A',
+    lat: 39.0047,
+    lon: -77.4418,
+    city: 'Sterling',
+    region: 'Virginia',
+    country: 'United States',
+    text: 'datacenters. name: STACK NVA01A. located in Sterling, Virginia, United States.',
+    nearestKm: 218,
+  },
+  {
+    id: 'dc-virgin',
+    kind: 'datacenter',
+    label: 'Virgin Media',
+    lat: 50.0698,
+    lon: -5.6771,
+    city: 'Sennen',
+    region: 'England',
+    country: 'United Kingdom',
+    text: 'datacenters. operator: Virgin Media. located in Sennen, England, United Kingdom.',
+    nearestKm: 0.7,
+  },
+];
+
+test('the reader, the gazetteer and the model each leave a step in the trace', async () => {
+  const seen = {};
+  const handler = createIntelHandler({
+    corpus: VIRGINIA_CORPUS(),
+    model: 'answer-model',
+    runtime: 'test',
+    reader: async () => ({
+      reading: {
+        place: 'Woodbridge',
+        region: 'Virginia',
+        country: '',
+        entityType: 'datacenter',
+        operator: '',
+        intent: 'list_in_place',
+        radiusKm: 0,
+      },
+      source: 'model',
+      ms: 7,
+    }),
+    readerModel: 'reader-model',
+    gazetteer: {
+      size: 1,
+      resolve: (reading) =>
+        reading.place === 'Woodbridge'
+          ? {
+              kind: 'place',
+              name: 'Woodbridge',
+              region: 'Virginia',
+              country: 'United States',
+              lat: 38.6582,
+              lon: -77.2497,
+              confidence: 'exact',
+            }
+          : null,
+    },
+    answer: async ({ records, place }) => {
+      seen.place = place;
+      seen.records = records;
+      return {
+        answer: 'STACK NVA01A is the nearest.',
+        usedIds: ['dc-stack'],
+        camera: 'site',
+        focusId: 'dc-stack',
+        model: 'answer-model',
+      };
+    },
+  });
+  const body = await query(
+    handler,
+    'what datacenters are in Woodbridge, Virginia',
+  );
+  assert.equal(body.answer, 'STACK NVA01A is the nearest.');
+  assert.deepEqual(
+    body.citations.map((citation) => citation.id),
+    ['dc-stack'],
+  );
+  assert.equal(body.citations[0].city, 'Sterling');
+  assert.ok(
+    body.citations[0].why.km > 40 && body.citations[0].why.km < 50,
+    `distance ${body.citations[0].why.km}`,
+  );
+  assert.equal(body.place.name, 'Woodbridge');
+  assert.equal(body.reading.place, 'Woodbridge');
+  assert.deepEqual(
+    body.trace.map((step) => step.step),
+    ['read', 'resolve', 'retrieve', 'answer'],
+  );
+  assert.match(
+    body.trace[0].detail,
+    /Woodbridge, Virginia · datacenters · list_in_place/,
+  );
+  assert.match(
+    body.trace[1].detail,
+    /Woodbridge, Virginia, United States \(38\.66, -77\.25\)/,
+  );
+  assert.match(
+    body.trace[2].detail,
+    /1 of 6 records · keywords \+ place · within 75 km/,
+  );
+  assert.deepEqual(body.actions, [
+    { type: 'fly', id: 'dc-stack' },
+    {
+      type: 'place',
+      kind: 'place',
+      name: 'Woodbridge',
+      region: 'Virginia',
+      country: 'United States',
+      lat: 38.6582,
+      lon: -77.2497,
+      confidence: 'exact',
+    },
+  ]);
+  assert.equal(seen.place.name, 'Woodbridge');
+  assert.equal(
+    seen.records[0].why.km,
+    body.citations[0].why.km,
+    'the model is told the distance',
+  );
+});
+
+test('a place with nothing near it declines, naming the place and the reach', async () => {
+  const handler = createIntelHandler({
+    corpus: VIRGINIA_CORPUS(),
+    model: 'm',
+    runtime: 'test',
+    reader: async () => ({
+      reading: {
+        place: 'Perth',
+        region: '',
+        country: 'Australia',
+        entityType: 'datacenter',
+        operator: '',
+        intent: 'list_in_place',
+        radiusKm: 0,
+      },
+      source: 'model',
+      ms: 1,
+    }),
+    gazetteer: {
+      size: 1,
+      resolve: () => ({
+        kind: 'place',
+        name: 'Perth',
+        region: 'Western Australia',
+        country: 'Australia',
+        lat: -31.95,
+        lon: 115.86,
+        confidence: 'exact',
+      }),
+    },
+    answer: async () => {
+      throw new Error('must not be asked');
+    },
+  });
+  const body = await query(handler, 'datacenters in Perth');
+  assert.equal(body.answer, 'No matching records within 75 km of Perth.');
+  assert.deepEqual(body.citations, []);
+  assert.equal(body.actions[0].type, 'place');
+});
+
+test('a model that ignores the used ids still gets its citations in retrieval order', async () => {
+  const handler = createIntelHandler({
+    corpus: VIRGINIA_CORPUS(),
+    model: 'm',
+    runtime: 'test',
+    answer: async () => ({
+      answer: 'prose only',
+      usedIds: [],
+      camera: '',
+      focusId: '',
+    }),
+  });
+  const body = await query(handler, 'Virgin Media');
+  assert.deepEqual(
+    body.citations.map((citation) => citation.id),
+    ['dc-virgin'],
+  );
+  assert.deepEqual(body.actions, [{ type: 'fly', id: 'dc-virgin' }]);
+  assert.deepEqual(
+    body.trace.map((step) => step.step),
+    ['retrieve', 'answer'],
+    'no reader, no gazetteer: no such steps',
+  );
+});
+
+test('vectors join the retrieval once the index is ready', async () => {
+  const corpus = VIRGINIA_CORPUS();
+  const index = {
+    model: 'embed',
+    size: corpus.length,
+    dims: 2,
+    embedQuery: async () => new Float32Array([1, 0]),
+    search: () => [
+      {
+        index: corpus.findIndex((record) => record.id === 'dc-virgin'),
+        similarity: 0.9,
+      },
+    ],
+  };
+  const handler = createIntelHandler({
+    corpus,
+    model: 'm',
+    runtime: 'test',
+    embeddings: () => index,
+    answer: async () => ({
+      answer: 'x',
+      usedIds: [],
+      camera: 'none',
+      focusId: '',
+    }),
+  });
+  const body = await query(handler, 'the cable station on the Cornish coast');
+  assert.equal(body.citations[0].id, 'dc-virgin');
+  assert.equal(body.citations[0].why.similarity, 0.9);
+  assert.match(body.trace[0].detail, /vectors/);
+  assert.deepEqual(body.actions, [], 'camera none means no action');
+});
+
+test('health reports the reader, the vector index and the gazetteer', async () => {
+  const handler = createIntelHandler({
+    corpus: RECORDS,
+    model: 'm',
+    runtime: 'test',
+    reader: async () => ({}),
+    readerModel: 'r',
+    gazetteer: { size: 42, resolve: () => null },
+    embeddings: () => null,
+    embeddingsStatus: () => ({
+      model: 'embed',
+      ready: false,
+      indexed: 10,
+      total: 2,
+    }),
+    answer: async () => ({}),
+  });
+  const health = JSON.parse((await invoke(handler)).body);
+  assert.deepEqual(health.reader, { model: 'r' });
+  assert.deepEqual(health.embeddings, {
+    model: 'embed',
+    ready: false,
+    indexed: 10,
+    total: 2,
+  });
+  assert.deepEqual(health.gazetteer, { places: 42 });
+});
+
+test('camera actions never point at an id the model was not shown', () => {
+  const citations = [{ id: 'a' }, { id: 'b' }];
+  assert.deepEqual(
+    deriveActions({ camera: 'site', focusId: 'zzz' }, citations, null),
+    [{ type: 'fly', id: 'a' }],
+  );
+  assert.deepEqual(deriveActions({ camera: 'frame_all' }, citations, null), [
+    { type: 'frame', ids: ['a', 'b'] },
+  ]);
+  assert.deepEqual(deriveActions({ camera: 'none' }, citations, null), []);
+  assert.deepEqual(deriveActions({}, [{ id: 'a' }], null), [
+    { type: 'fly', id: 'a' },
+  ]);
+  assert.deepEqual(deriveActions({}, [], null), []);
+});

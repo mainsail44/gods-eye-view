@@ -42,9 +42,90 @@ export function stubAnswer(body) {
   );
 }
 
+/** Dimensions of the stub's embeddings; enough buckets that unrelated texts rarely collide. */
+export const STUB_EMBED_DIMS = 64;
+
+/** FNV-1a over a token, so the same word always lands in the same bucket. */
+const bucket = (token) => {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < token.length; index += 1) {
+    hash ^= token.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash % STUB_EMBED_DIMS;
+};
+
+/**
+ * A deterministic bag-of-words vector: each word adds one to its bucket and
+ * the result is unit length. Texts that share words are close, texts that
+ * share none are (nearly) orthogonal — enough for retrieval to be exercised
+ * and asserted without a model.
+ */
+export function stubEmbedding(text) {
+  const vector = new Array(STUB_EMBED_DIMS).fill(0);
+  for (const token of String(text ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean))
+    vector[bucket(token)] += 1;
+  const norm =
+    Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0)) || 1;
+  return vector.map((value) => Math.round((value / norm) * 1e6) / 1e6);
+}
+
+/** An OpenAI embeddings response for one or many inputs, in input order. */
+export function stubEmbeddings(body) {
+  const inputs = Array.isArray(body?.input) ? body.input : [body?.input ?? ''];
+  return {
+    object: 'list',
+    model: String(body?.model ?? 'starlight-stub-embed'),
+    data: inputs.map((text, index) => ({
+      object: 'embedding',
+      index,
+      embedding: stubEmbedding(text),
+    })),
+    usage: { prompt_tokens: 0, total_tokens: 0 },
+  };
+}
+
+/**
+ * What the stub says when asked for JSON against a schema. The reader's
+ * schema gets an empty reading — the stub understands nothing, and says so
+ * by leaving every field blank — and the answer schema gets the same stub
+ * prose as before, naming the first records as the ones it "used" so the
+ * camera actions are exercised. Any other schema gets an empty object.
+ */
+export function stubStructured(body) {
+  const schema = body?.response_format?.json_schema;
+  const name = String(schema?.name ?? '');
+  if (name === 'question_reading')
+    return {
+      place: '',
+      region: '',
+      country: '',
+      entity_type: 'any',
+      operator: '',
+      intent: 'other',
+      radius_km: 0,
+    };
+  if (name === 'grounded_answer') {
+    const ids = recordIds(body);
+    return {
+      answer: stubAnswer(body),
+      used_ids: ids.slice(0, 3),
+      camera: ids.length > 1 ? 'frame_all' : ids.length ? 'site' : 'none',
+      focus_id: ids[0] ?? '',
+    };
+  }
+  return {};
+}
+
 /** An OpenAI chat-completion response, with no field that varies per call. */
 export function stubCompletion(body) {
-  const content = stubAnswer(body);
+  const content =
+    body?.response_format?.type === 'json_schema'
+      ? JSON.stringify(stubStructured(body))
+      : stubAnswer(body);
   const id = createHash('sha256')
     .update(`${body?.model ?? ''}\n${content}`)
     .digest('hex')
@@ -113,6 +194,12 @@ export function createStubRuntimeHandler() {
       if (body === null)
         return send(res, 400, { error: 'Invalid request body' });
       return send(res, 200, stubCompletion(body));
+    }
+    if (req.method === 'POST' && url === '/v1/embeddings') {
+      const body = await readBody(req);
+      if (body === null)
+        return send(res, 400, { error: 'Invalid request body' });
+      return send(res, 200, stubEmbeddings(body));
     }
     return send(res, 404, { error: 'Not found' });
   };

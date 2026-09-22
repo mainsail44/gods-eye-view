@@ -153,3 +153,58 @@ test('health answers, and other routes are 404', async () => {
   const missing = await invoke(handler, { method: 'GET', url: '/v1/models' });
   assert.equal(missing.status, 404);
 });
+
+// --- Embeddings and schema-shaped answers, so the AI-native path runs GPU-free.
+
+import {
+  stubEmbedding,
+  stubEmbeddings,
+  stubStructured,
+  STUB_EMBED_DIMS,
+} from '../../services/intel/test/stub-runtime.mjs';
+
+test('stub embeddings are deterministic unit vectors that reward shared words', () => {
+  const a = stubEmbedding('Equinix Marseille datacenter');
+  const b = stubEmbedding('Equinix Marseille datacenter');
+  const c = stubEmbedding('Marseille datacenter');
+  const d = stubEmbedding('Sterling Virginia');
+  assert.deepEqual(a, b);
+  assert.equal(a.length, STUB_EMBED_DIMS);
+  const dot = (x, y) =>
+    x.reduce((sum, value, index) => sum + value * y[index], 0);
+  assert.ok(Math.abs(dot(a, a) - 1) < 1e-4);
+  assert.ok(dot(a, c) > dot(a, d), 'shared words score higher than none');
+  const response = stubEmbeddings({ model: 'e', input: ['x', 'y'] });
+  assert.equal(response.data.length, 2);
+  assert.deepEqual(
+    response.data.map((item) => item.index),
+    [0, 1],
+  );
+});
+
+test('the stub fills the reader schema blank and the answer schema with its prose', () => {
+  assert.equal(
+    stubStructured({
+      response_format: { json_schema: { name: 'question_reading' } },
+    }).place,
+    '',
+  );
+  const body = {
+    response_format: { json_schema: { name: 'grounded_answer' } },
+    messages: [
+      {
+        role: 'user',
+        content: 'Records:\n- dc-1: A\n- dc-2: B\n\nQuestion: q',
+      },
+    ],
+  };
+  const structured = stubStructured(body);
+  assert.match(structured.answer, /^Starlight stub runtime/);
+  assert.deepEqual(structured.used_ids, ['dc-1', 'dc-2']);
+  assert.equal(structured.camera, 'frame_all');
+  assert.equal(structured.focus_id, 'dc-1');
+  assert.deepEqual(
+    stubStructured({ response_format: { json_schema: { name: 'other' } } }),
+    {},
+  );
+});

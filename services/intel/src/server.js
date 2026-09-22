@@ -1,11 +1,11 @@
 import { corpusChecksum, selectRetrievalMode } from './corpus.js';
+import { EMPTY_READING, isEmptyReading } from './reader.js';
+import { indexCorpus, retrieveHybrid } from './retrieval.js';
 
 /** Reject a request body larger than this before it is ever parsed. */
 const MAX_BODY_BYTES = 65536; // 64 KB
 /** Reject a question longer than this before any retrieval work runs. */
 const MAX_QUESTION_LENGTH = 2000;
-/** Cap the distinct terms scored per record, regardless of question length. */
-const MAX_QUERY_TERMS = 50;
 
 /** Sentinel distinguishing "body exceeded the size cap" from invalid JSON or an empty body. */
 const TOO_LARGE = Symbol('too-large');
@@ -47,126 +47,94 @@ const send = (res, status, payload) => {
   res.end(JSON.stringify(payload));
 };
 
-/**
- * Words that carry no information about which record is wanted. They neither
- * match nor count: `by` inside "Brondby" and "Bygby" once matched 52 records,
- * which made it look rarer — and so worth more — than "equinix".
- */
-const STOPWORDS = new Set([
-  'a',
-  'an',
-  'and',
-  'are',
-  'at',
-  'by',
-  'for',
-  'in',
-  'is',
-  'near',
-  'nearest',
-  'of',
-  'on',
-  'operated',
-  'show',
-  'that',
-  'the',
-  'to',
-  'what',
-  'which',
-  'with',
-]);
+/** What the panel shows and flies to for one record. */
+export const citationOf = (record) => ({
+  id: record.id,
+  label: record.label,
+  kind: record.kind ?? '',
+  lat: record.lat,
+  lon: record.lon,
+  ...(record.operator ? { operator: record.operator } : {}),
+  ...(record.city ? { city: record.city } : {}),
+  ...(record.region ? { region: record.region } : {}),
+  ...(record.country ? { country: record.country } : {}),
+  ...(record.why ? { why: record.why } : {}),
+});
 
-/** Below this length a query term must equal a token; prefixes match above it. */
-const MIN_PREFIX_LENGTH = 3;
-
-const tokenize = (value) =>
-  String(value ?? '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+/** The place a question was resolved to, as the panel marks it. */
+export const placeOf = (place) =>
+  place
+    ? {
+        kind: place.kind,
+        name: place.name,
+        region: place.region ?? '',
+        country: place.country ?? '',
+        lat: place.lat,
+        lon: place.lon,
+        ...(place.radiusKm ? { radiusKm: place.radiusKm } : {}),
+        confidence: place.confidence ?? 'exact',
+      }
+    : null;
 
 /**
- * One token matches another when either is a prefix of the other, so
- * datacenter/datacenters and point/points match without `includes()` letting a
- * term match the middle of an unrelated word.
+ * What the globe should do with an answer. The model says whether one record
+ * is the answer or several are; the service turns that into actions the
+ * application understands, never trusting an id the model did not get.
+ * @param {{camera?: string, focusId?: string}} verdict From the model.
+ * @param {object[]} citations In the order they will be shown.
+ * @param {object|null} place The resolved place, if any.
  */
-const tokenMatches = (token, term) => {
-  if (token === term) return true;
-  if (Math.min(token.length, term.length) < MIN_PREFIX_LENGTH) return false;
-  return token.startsWith(term) || term.startsWith(token);
-};
-
-/**
- * Index the corpus once, at startup. Each record becomes a set of tokens, and
- * each token keeps the records it appears in, so a query costs one pass over
- * the vocabulary rather than a substring scan of every record.
- */
-function indexCorpus(corpus) {
-  const postings = new Map();
-  corpus.forEach((record, index) => {
-    for (const token of new Set(
-      tokenize(`${record.label ?? ''} ${record.text ?? ''}`),
-    )) {
-      if (STOPWORDS.has(token)) continue;
-      const seen = postings.get(token);
-      if (seen) seen.push(index);
-      else postings.set(token, [index]);
-    }
-  });
-  return postings;
+export function deriveActions(verdict, citations, place) {
+  const actions = [];
+  const ids = new Set(citations.map((citation) => citation.id));
+  const camera = verdict?.camera ?? '';
+  const focus = ids.has(verdict?.focusId) ? verdict.focusId : citations[0]?.id;
+  if (camera === 'site' && focus) actions.push({ type: 'fly', id: focus });
+  else if (camera === 'frame_all' && citations.length)
+    actions.push({ type: 'frame', ids: citations.map((citation) => citation.id) });
+  else if (camera !== 'none' && citations.length > 1)
+    actions.push({ type: 'frame', ids: citations.map((citation) => citation.id) });
+  else if (camera !== 'none' && focus) actions.push({ type: 'fly', id: focus });
+  if (place) actions.push({ type: 'place', ...placeOf(place) });
+  return actions;
 }
 
-/**
- * Distance used to order records that tie on relevance. A landing point has
- * none: it is the place being asked about, so it sorts as if at zero, ahead of
- * a datacenter it would otherwise tie with.
- */
-const distance = (record) =>
-  Number.isFinite(record?.nearestKm) ? record.nearestKm : 0;
+const describeReading = (reading) =>
+  [
+    [reading.place, reading.region, reading.country].filter(Boolean).join(', ') ||
+      'no place',
+    reading.entityType === 'any' ? 'any record' : `${reading.entityType}s`,
+    reading.operator && `operator ${reading.operator}`,
+    reading.intent,
+    reading.radiusKm ? `${reading.radiusKm} km` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
-/**
- * Rank corpus records by term overlap; sufficient before embeddings. Terms are
- * weighted by how rare they are, because every datacenter record carries the
- * words "cable landing point": counting each match equally lets that
- * boilerplate outvote the place name the question actually turns on. The
- * weight stays strictly positive, so any matching term still counts as a match
- * and an empty retrieval still means nothing matched at all.
- *
- * Records that tie — every datacenter whose nearest landing point is Marseille
- * scores identically — are ordered by that stored distance, so "near the
- * Marseille landing point" answers with the ones actually near it.
- */
-function retrieve(corpus, postings, question, limit) {
-  const terms = [...new Set(tokenize(question))]
-    .filter((term) => !STOPWORDS.has(term))
-    .slice(0, MAX_QUERY_TERMS);
-  if (!terms.length) return [];
-
-  const scores = new Map();
-  for (const term of terms) {
-    const matched = new Set();
-    for (const [token, records] of postings) {
-      if (tokenMatches(token, term))
-        for (const index of records) matched.add(index);
-    }
-    if (!matched.size) continue;
-    const weight = Math.log(1 + corpus.length / (1 + matched.size));
-    for (const index of matched)
-      scores.set(index, (scores.get(index) ?? 0) + weight);
-  }
-
-  return [...scores]
-    .map(([index, score]) => ({ record: corpus[index], score }))
-    .sort(
-      (a, b) => b.score - a.score || distance(a.record) - distance(b.record),
-    )
-    .slice(0, limit)
-    .map((entry) => entry.record);
-}
+const describePlace = (place) =>
+  place
+    ? `${[place.name, place.region, place.country].filter(Boolean).join(', ')} ` +
+      `(${place.lat.toFixed(2)}, ${place.lon.toFixed(2)})` +
+      (place.radiusKm ? ` ±${place.radiusKm} km` : '') +
+      (place.confidence === 'ambiguous' ? ' — assumed' : '')
+    : 'no place resolved';
 
 /**
  * Build the request handler. `answer` performs model inference and is injected
  * so routing and the decline-on-empty rule stay testable without a model.
+ *
+ * @param {object} options
+ * @param {object[]} options.corpus
+ * @param {string} options.model Answering model, reported on /health.
+ * @param {string} options.runtime
+ * @param {string} [options.egress]
+ * @param {string} [options.attestation]
+ * @param {Function} options.answer `({question, mode, records, reading, place}) => {answer, usedIds?, camera?, focusId?, model?}`
+ * @param {Function} [options.reader] `(question) => {reading, source, ms}`; none skips reading.
+ * @param {string} [options.readerModel] Reported on /health.
+ * @param {object} [options.gazetteer] From gazetteer.js; none skips place resolution.
+ * @param {() => object|null} [options.embeddings] The vector index once built; null until then.
+ * @param {() => object} [options.embeddingsStatus] For /health while the index builds.
  */
 export function createIntelHandler({
   corpus = [],
@@ -175,6 +143,11 @@ export function createIntelHandler({
   egress = 'unknown',
   attestation = 'unavailable',
   answer,
+  reader = null,
+  readerModel = '',
+  gazetteer = null,
+  embeddings = () => null,
+  embeddingsStatus = () => null,
 }) {
   const checksum = corpusChecksum(corpus);
   const version = new Date().toISOString().slice(0, 10);
@@ -184,12 +157,18 @@ export function createIntelHandler({
     const path = String(req.url || '').split('?')[0];
 
     if (req.method === 'GET' && path === '/health') {
+      const index = embeddings();
       return send(res, 200, {
         model,
         runtime,
         egress,
         attestation,
         corpus: { version, checksum, records: corpus.length },
+        reader: { model: reader ? readerModel || model : null },
+        embeddings: index
+          ? { model: index.model, ready: true, indexed: index.size, dims: index.dims }
+          : (embeddingsStatus() ?? { model: null, ready: false, indexed: 0 }),
+        gazetteer: { places: gazetteer?.size ?? 0 },
       });
     }
 
@@ -206,24 +185,99 @@ export function createIntelHandler({
         ? Math.min(50, Math.max(1, Math.trunc(requested)))
         : 5;
       const mode = selectRetrievalMode(question);
-      const records = retrieve(corpus, postings, question, limit);
+      const trace = [];
+
+      // 1. The model reads the question.
+      const read = reader
+        ? await reader(question)
+        : { reading: EMPTY_READING, source: 'none', ms: 0 };
+      const reading = read.reading ?? EMPTY_READING;
+      if (reader)
+        trace.push({
+          step: 'read',
+          ms: read.ms,
+          detail: read.source === 'model' ? describeReading(reading) : `no reading (${read.error ?? read.source})`,
+        });
+
+      // 2. The gazetteer places it.
+      let place = null;
+      if (gazetteer && !isEmptyReading(reading)) {
+        const started = Date.now();
+        place = gazetteer.resolve(reading) ?? null;
+        trace.push({ step: 'resolve', ms: Date.now() - started, detail: describePlace(place) });
+      }
+
+      // 3. Meaning, words and distance find the records.
+      const started = Date.now();
+      let similar = null;
+      const index = embeddings();
+      if (index) {
+        try {
+          similar = index.search(await index.embedQuery(question), 50);
+        } catch {
+          similar = null;
+        }
+      }
+      const retrieved = retrieveHybrid({
+        corpus,
+        postings,
+        question,
+        reading,
+        place,
+        similar,
+        limit,
+      });
+      const records = retrieved.records;
+      trace.push({
+        step: 'retrieve',
+        ms: Date.now() - started,
+        detail:
+          `${records.length} of ${corpus.length} records` +
+          (retrieved.signals.length ? ` · ${retrieved.signals.join(' + ')}` : '') +
+          (retrieved.radiusKm ? ` · within ${Math.round(retrieved.radiusKm)} km` : ''),
+      });
+
+      const common = {
+        reading,
+        place: placeOf(place),
+        trace,
+        corpus: { version, checksum },
+      };
 
       // Declining beats guessing: an unsupported answer is worse than none.
       if (!records.length) {
         return send(res, 200, {
-          answer: 'No matching records in the local corpus.',
+          answer: place
+            ? `No matching records within ${Math.round(retrieved.radiusKm ?? 0)} km of ${place.name}.`
+            : 'No matching records in the local corpus.',
           citations: [],
-          actions: [],
-          corpus: { version, checksum },
+          actions: place ? [{ type: 'place', ...placeOf(place) }] : [],
+          ...common,
         });
       }
 
-      const result = await answer({ question, mode, records });
+      // 4. The model answers from them and says which ones it used.
+      const answering = Date.now();
+      const result = await answer({ question, mode, records, reading, place });
+      const usedIds = Array.isArray(result?.usedIds) ? result.usedIds : [];
+      const byId = new Map(records.map((record) => [record.id, record]));
+      // The records the model relied on lead; the rest of the retrieval
+      // follows, so a citation the model ignored is still reachable.
+      const ordered = [
+        ...usedIds.map((id) => byId.get(id)).filter(Boolean),
+        ...records.filter((record) => !usedIds.includes(record.id)),
+      ];
+      const citations = ordered.map(citationOf);
+      trace.push({
+        step: 'answer',
+        ms: Date.now() - answering,
+        detail: `${result?.model ?? model} · ${usedIds.filter((id) => byId.has(id)).length || records.length} records used`,
+      });
       return send(res, 200, {
         answer: String(result?.answer ?? ''),
-        citations: Array.isArray(result?.citations) ? result.citations : [],
-        actions: Array.isArray(result?.actions) ? result.actions : [],
-        corpus: { version, checksum },
+        citations,
+        actions: deriveActions(result, citations, place),
+        ...common,
       });
     }
 
