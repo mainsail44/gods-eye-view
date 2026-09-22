@@ -16,12 +16,20 @@
 FROM docker.io/library/node:24-slim AS corpus
 WORKDIR /build
 COPY services/intel/src/buildCorpus.js services/intel/src/corpus.js \
+     services/intel/src/geo.js services/intel/src/gazetteer.js \
      /build/services/intel/src/
 COPY services/intel/scripts/build-corpus.mjs /build/services/intel/scripts/
 COPY src/data/local_data/datacenters/datacenters.geojsonl \
      /build/src/data/local_data/datacenters/
 COPY src/data/local_data/telegeography_submarine_cables/landing-point-geo.json \
      /build/src/data/local_data/telegeography_submarine_cables/
+# The vendored GeoNames slice places every record in its nearest town at
+# build time and resolves the places questions name at run time.
+COPY src/data/local_data/geonames/places.tsv.gz \
+     src/data/local_data/geonames/admin1.tsv \
+     src/data/local_data/geonames/admin2.tsv \
+     src/data/local_data/geonames/countries.tsv \
+     /build/src/data/local_data/geonames/
 RUN node services/intel/scripts/build-corpus.mjs --out /corpus/corpus.json
 
 FROM docker.io/library/node:24-slim AS runtime
@@ -34,10 +42,18 @@ COPY services/intel/src /app/services/intel/src
 COPY services/intel/test /app/services/intel/test
 COPY src/sources/intelEndpoint.js /app/src/sources/intelEndpoint.js
 COPY --from=corpus /corpus/corpus.json /app/corpus/corpus.json
+COPY --from=corpus /build/src/data/local_data/geonames /app/gazetteer
+
+# The vector index is embedded by the runtime on first start and cached here;
+# compose mounts a volume on it so a restart reads the cache instead.
+RUN mkdir -p /app/cache && chown node:node /app/cache
+VOLUME /app/cache
 
 ENV NODE_ENV=production \
     PORT=8080 \
-    INTEL_CORPUS=/app/corpus/corpus.json
+    INTEL_CORPUS=/app/corpus/corpus.json \
+    INTEL_GAZETTEER=/app/gazetteer \
+    INTEL_EMBED_CACHE=/app/cache
 
 EXPOSE 8080
 USER node

@@ -10,8 +10,10 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gunzipSync } from 'node:zlib';
 import { buildCorpusRecords, serializeCorpus } from '../src/buildCorpus.js';
 import { corpusChecksum } from '../src/corpus.js';
+import { createGazetteer } from '../src/gazetteer.js';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 
@@ -19,6 +21,7 @@ const DEFAULTS = {
   datacenters: 'src/data/local_data/datacenters/datacenters.geojsonl',
   'landing-points':
     'src/data/local_data/telegeography_submarine_cables/landing-point-geo.json',
+  gazetteer: 'src/data/local_data/geonames',
 };
 
 /** Parse `--name value` pairs; anything else is a usage error. */
@@ -29,7 +32,7 @@ function parseArguments(argv) {
     const value = argv[index + 1];
     if (!flag?.startsWith('--') || value === undefined)
       throw new Error(
-        'Usage: build-corpus.mjs --out <file> [--datacenters <file>] [--landing-points <file>]',
+        'Usage: build-corpus.mjs --out <file> [--datacenters <file>] [--landing-points <file>] [--gazetteer <dir>|none]',
       );
     options[flag.slice(2)] = value;
   }
@@ -66,18 +69,39 @@ async function readFeatureCollection(file) {
 const resolve = (file) =>
   path.isAbsolute(file) ? file : path.join(ROOT, file);
 
+/** The vendored GeoNames slice; `--gazetteer none` builds without places. */
+async function readGazetteer(directory) {
+  if (!directory || directory === 'none') return null;
+  const [places, admin1, admin2, countries] = await Promise.all([
+    readFile(path.join(directory, 'places.tsv.gz')).then((buffer) =>
+      gunzipSync(buffer).toString('utf8'),
+    ),
+    readFile(path.join(directory, 'admin1.tsv'), 'utf8'),
+    // Districts are optional: an older slice without them still builds.
+    readFile(path.join(directory, 'admin2.tsv'), 'utf8').catch(() => ''),
+    readFile(path.join(directory, 'countries.tsv'), 'utf8'),
+  ]);
+  return createGazetteer({ places, admin1, admin2, countries });
+}
+
 async function main(argv) {
   const started = Date.now();
   const options = parseArguments(argv);
-  const [datacenters, landingPoints] = await Promise.all([
+  const [datacenters, landingPoints, gazetteer] = await Promise.all([
     readGeoJsonLines(resolve(options.datacenters)),
     readFeatureCollection(resolve(options['landing-points'])),
+    readGazetteer(
+      options.gazetteer === 'none' ? 'none' : resolve(options.gazetteer),
+    ),
   ]);
 
   const skips = new Map();
   const records = buildCorpusRecords(
     { datacenters, landingPoints },
-    { onSkip: ({ reason }) => skips.set(reason, (skips.get(reason) ?? 0) + 1) },
+    {
+      onSkip: ({ reason }) => skips.set(reason, (skips.get(reason) ?? 0) + 1),
+      gazetteer,
+    },
   );
   const serialized = serializeCorpus(records);
   const out = path.resolve(process.cwd(), options.out);
@@ -95,6 +119,9 @@ async function main(argv) {
       `-> ${out} ${Buffer.byteLength(serialized)} bytes in ${Date.now() - started} ms`,
   );
   console.log(`[corpus] checksum ${corpusChecksum(records)}`);
+  console.log(
+    `[corpus] places: ${gazetteer ? `${gazetteer.size} gazetteer entries` : 'none (built without a gazetteer)'}`,
+  );
   for (const [reason, count] of [...skips].sort())
     console.log(`[corpus] skipped ${count}: ${reason}`);
 }

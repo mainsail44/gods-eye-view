@@ -4,6 +4,11 @@
 // services/intel/scripts/build-corpus.mjs so this stays unit-testable against
 // small synthetic fixtures.
 
+import { haversineKm } from './geo.js';
+
+/** Re-exported for callers that reached the geodesy through this module. */
+export { haversineKm };
+
 /** Attribution carried by every datacenter record (see the source README). */
 export const DATACENTER_SOURCE = 'OpenStreetMap contributors, ODbL 1.0';
 
@@ -11,13 +16,8 @@ export const DATACENTER_SOURCE = 'OpenStreetMap contributors, ODbL 1.0';
 export const LANDING_POINT_SOURCE =
   'TeleGeography submarinecablemap.com, CC BY-NC-SA 3.0';
 
-/** Mean Earth radius (IUGG), in kilometres. */
-const EARTH_RADIUS_KM = 6371.0088;
-
 /** Coordinates are stored at ~0.1 m precision so the output stays stable. */
 const COORDINATE_DECIMALS = 6;
-
-const toRadians = (degrees) => (degrees * Math.PI) / 180;
 
 /** Round to a fixed precision, never emitting -0, so output is byte-stable. */
 function round(value, decimals) {
@@ -144,18 +144,6 @@ export function centroid(geometry) {
   return fallback ? { lat: fallback.lat, lon: fallback.lon } : null;
 }
 
-/** Great-circle distance in kilometres between two {lat, lon} points. */
-export function haversineKm(from, to) {
-  const deltaLat = toRadians(to.lat - from.lat);
-  const deltaLon = toRadians(to.lon - from.lon);
-  const fromLat = toRadians(from.lat);
-  const toLat = toRadians(to.lat);
-  const a =
-    Math.sin(deltaLat / 2) ** 2 +
-    Math.cos(fromLat) * Math.cos(toLat) * Math.sin(deltaLon / 2) ** 2;
-  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(a)));
-}
-
 /**
  * Nearest landing-point record to a location. 4351 x 1917 comparisons run in
  * well under a second, so no spatial index earns its complexity here. Ties
@@ -174,16 +162,52 @@ export function nearestLandingPoint(location, landingPoints) {
   return best ? { record: best, km: bestKm } : null;
 }
 
+/**
+ * Where a record is, in the words a question would use. The nearest
+ * populated place from the gazetteer, its region and its country — so
+ * "Virginia" and "Ashburn" reach a record whose name says only "IAD40", and
+ * the model can say where a site is without being handed coordinates.
+ * @returns {{fields: object, sentence: string}}
+ */
+function placeOf(point, gazetteer) {
+  const near = gazetteer?.nearest?.(point.lat, point.lon);
+  if (!near) return { fields: {}, sentence: '' };
+  const parts = [near.name, near.region, near.country].filter(Boolean);
+  return {
+    fields: {
+      city: near.name,
+      region: near.region,
+      country: near.country,
+      countryCode: near.countryCode,
+    },
+    sentence: `located in ${parts.join(', ')}`,
+  };
+}
+
+/** "https://www.equinix.com/data-centers/x" → "equinix.com"; anything unusable → ''. */
+function websiteDomain(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  try {
+    return new URL(raw.includes('://') ? raw : `https://${raw}`).hostname
+      .replace(/^www\./, '')
+      .toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
 /** Join the non-empty parts of a record's text into one sentence-per-part line. */
 const sentences = (parts) => `${parts.filter(Boolean).join('. ')}.`;
 
-function landingPointRecord(feature) {
+function landingPointRecord(feature, gazetteer) {
   const properties = feature?.properties ?? {};
   const id = properties.id == null ? '' : String(properties.id).trim();
   if (!id) return { skip: 'landing point has no id' };
   const point = centroid(feature?.geometry);
   if (!point) return { skip: 'landing point has no usable coordinate' };
   const name = String(properties.name ?? '').trim();
+  const place = placeOf(point, gazetteer);
   return {
     record: {
       id: `lp-${id}`,
@@ -191,18 +215,20 @@ function landingPointRecord(feature) {
       label: name || id,
       lat: round(point.lat, COORDINATE_DECIMALS),
       lon: round(point.lon, COORDINATE_DECIMALS),
+      ...place.fields,
       // The plural leads so that both "landing point" and "landing points"
       // match the retriever's substring term test.
       text: sentences([
         'submarine cable landing points',
         name && `name: ${name}`,
+        place.sentence,
       ]),
       source: LANDING_POINT_SOURCE,
     },
   };
 }
 
-function datacenterRecord(feature, landingPoints) {
+function datacenterRecord(feature, landingPoints, gazetteer) {
   const properties = feature?.properties ?? {};
   const osmId =
     properties.osm_id == null ? '' : String(properties.osm_id).trim();
@@ -212,8 +238,12 @@ function datacenterRecord(feature, landingPoints) {
   const tags = properties.tags ?? {};
   const name = String(tags.name ?? '').trim();
   const operator = String(tags.operator ?? '').trim();
+  const operatorShort = String(tags['operator:short'] ?? '').trim();
+  const website = websiteDomain(tags.website);
+  const levels = Number(tags['building:levels']);
   const lat = round(point.lat, COORDINATE_DECIMALS);
   const lon = round(point.lon, COORDINATE_DECIMALS);
+  const place = placeOf({ lat, lon }, gazetteer);
   // Precomputed at build time: it is what lets plain term overlap answer
   // "which datacenters are near the <place> landing point".
   const nearest = nearestLandingPoint({ lat, lon }, landingPoints);
@@ -221,13 +251,28 @@ function datacenterRecord(feature, landingPoints) {
     record: {
       id: `dc-${osmId}`,
       kind: 'datacenter',
-      label: name || operator || `Datacenter ${osmId}`,
+      // An unnamed, operator-less site is still somewhere: "Datacenter near
+      // Newington" reads better in an answer than an OpenStreetMap number.
+      label:
+        name ||
+        operator ||
+        (place.fields.city
+          ? `Datacenter near ${place.fields.city}`
+          : `Datacenter ${osmId}`),
       lat,
       lon,
+      ...(operator ? { operator } : {}),
+      ...place.fields,
       text: sentences([
         'datacenters',
         name && `name: ${name}`,
         operator && `operator: ${operator}`,
+        operatorShort &&
+          operatorShort !== operator &&
+          `operator: ${operatorShort}`,
+        website && `website: ${website}`,
+        Number.isFinite(levels) && levels > 0 && `${levels} floors`,
+        place.sentence,
         nearest &&
           `nearest cable landing point: ${nearest.record.label} (${nearest.km.toFixed(1)} km)`,
       ]),
@@ -246,12 +291,14 @@ function datacenterRecord(feature, landingPoints) {
  * same bytes — the checksum /health reports depends on it.
  *
  * @param {{ datacenters?: object[], landingPoints?: object[] }} sources
- * @param {{ onSkip?: (skip: { kind: string, reason: string }) => void }} options
+ * @param {{ onSkip?: (skip: { kind: string, reason: string }) => void, gazetteer?: object }} options
+ *   `gazetteer` (see gazetteer.js) places every record in its nearest town;
+ *   without it records carry no place fields, as before.
  * @returns {object[]}
  */
 export function buildCorpusRecords(
   { datacenters = [], landingPoints = [] } = {},
-  { onSkip } = {},
+  { onSkip, gazetteer = null } = {},
 ) {
   const records = [];
   const ids = new Set();
@@ -265,7 +312,7 @@ export function buildCorpusRecords(
 
   const landingRecords = [];
   for (const feature of landingPoints) {
-    const { record, skip } = landingPointRecord(feature);
+    const { record, skip } = landingPointRecord(feature, gazetteer);
     if (!record) {
       skipped('landing-point', skip);
       continue;
@@ -275,7 +322,11 @@ export function buildCorpusRecords(
   }
 
   for (const feature of datacenters) {
-    const { record, skip } = datacenterRecord(feature, landingRecords);
+    const { record, skip } = datacenterRecord(
+      feature,
+      landingRecords,
+      gazetteer,
+    );
     if (!record) {
       skipped('datacenter', skip);
       continue;

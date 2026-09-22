@@ -221,6 +221,13 @@ export const DATA_CREDITS = [
       '(ODbL 1.0)',
   },
   {
+    key: 'geonames',
+    html:
+      'Place names for Starlight Local Intel from ' +
+      '<a href="https://www.geonames.org" target="_blank" rel="noopener">GeoNames</a> ' +
+      '(CC BY 4.0)',
+  },
+  {
     key: 'dams',
     html:
       'Dams: ' +

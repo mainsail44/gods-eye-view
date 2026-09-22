@@ -102,6 +102,7 @@ The [Bhote Koshi event pack](public/events/bhote-koshi-2026/README.md), under `p
 | **TeleGeography Submarine Cable Map** (712 cables + 1,917 landing points)   | `telegeography_submarine_cables/` | **CC BY-NC-SA 3.0**                                                                                       | ❌ **NonCommercial — remove for commercial use** | "© TeleGeography — submarinecablemap.com"                                   |
 | **Natural Earth physical regions** (1,046 land + 292 marine named polygons) | `natural_earth/`                  | **Public domain**                                                                                         | ✅ (no restrictions)                             | "Made with Natural Earth" (courtesy credit — not legally required)          |
 | **DataSF Analysis Neighborhoods** (41 SF neighborhood polygons)             | `neighborhoods/`                  | **PDDL 1.0** (public domain)                                                                              | ✅ (no restrictions)                             | "City & County of San Francisco — DataSF" (courtesy — not legally required) |
+| **GeoNames gazetteer** (171,013 populated places, 3,865 regions, 252 countries) | `geonames/`                       | **CC BY 4.0**                                                                                             | ✅ (attribution)                                 | "Data from GeoNames (geonames.org), CC BY 4.0"                              |
 | **CCTV ground heights** (3,445 cameras)                                     | `cctv_ground_heights/`            | Precomputed camera placement heights, aligned to work with Google Photorealistic 3D Tiles (folder README) | —                                                | —                                                                           |
 
 ### ⚠️ TeleGeography is bundled but NonCommercial
@@ -171,6 +172,17 @@ Natural Earth is **public domain** (no permission needed, no attribution legally
 https://www.naturalearthdata.com/about/terms-of-use/). We credit anyway: "Made with Natural
 Earth". Registration in the in-app `dataCredits.js` attribution list ships with the resolver
 wiring (see below).
+
+### GeoNames gazetteer (`geonames/`)
+
+A seven-column slice of the GeoNames `cities1000` dump (populated places with
+1,000 or more inhabitants), plus the admin-1 region and country name tables.
+It is used only by the Starlight Local Intel service: at build time every
+corpus record is labelled with its nearest town, region and country, and at
+run time the place a question names ("Woodbridge, Virginia") is resolved to
+a coordinate offline. GeoNames data is **CC BY 4.0**; the attribution is
+registered in the in-app Data attribution popover. The folder README records
+the fetch date and the slimming script.
 
 ### DataSF Analysis Neighborhoods (`neighborhoods/`)
 

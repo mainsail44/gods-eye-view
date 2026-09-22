@@ -37,3 +37,13 @@ test('adsbdb is credited and carries its published route-data restriction', () =
   assert.match(credit.html, /Guillaume Michel/);
   assert.match(credit.html, /href="https:\/\/www\.adsbdb\.com"/);
 });
+
+test('GeoNames is credited for the intel gazetteer, as CC BY 4.0 requires', () => {
+  const credit = DATA_CREDITS.find((entry) => entry.key === 'geonames');
+  assert.ok(
+    credit,
+    'the gazetteer under src/data/local_data/geonames is CC BY',
+  );
+  assert.match(credit.html, /href="https:\/\/www\.geonames\.org"/);
+  assert.match(credit.html, /CC BY 4\.0/);
+});
