@@ -26,6 +26,25 @@ const MIN_FRAME_RADIUS_M = 2500;
 /** Above this a region ring would fill the frame; the camera shows the sites instead. */
 const MAX_PLACE_RING_M = 400_000;
 const FRAME_PITCH_DEG = -45;
+/** Sites farther than this from the resolved place are keyword strays; leave them out of the frame. */
+const FRAME_NEAR_KM = 12;
+/** Always frame at least this many of the nearest sites, even when all are far. */
+const FRAME_MIN_SITES = 3;
+
+const kmBetween = (a, b) =>
+  Cesium.Cartesian3.distance(position(a), position(b)) / 1000;
+
+/** Keep the framed sites near the place the question named, nearest first. */
+export function nearPlace(citations, place, nearKm = FRAME_NEAR_KM, minSites = FRAME_MIN_SITES) {
+  if (!place || !Number.isFinite(place.lat) || !Number.isFinite(place.lon)) return citations;
+  const ranked = citations
+    .map((c) => ({ c, km: kmBetween(c, place) }))
+    .sort((a, b) => a.km - b.km);
+  const near = ranked.filter((r) => r.km <= nearKm);
+  // Anything near the town wins outright; only when nothing is near do the
+  // nearest few stand in, so the operator still sees where the answer points.
+  return (near.length ? near : ranked.slice(0, minSites)).map((r) => r.c);
+}
 const FRAME_DURATION_S = 2.6;
 
 const LABEL_FONT = '13px "JetBrains Mono", "IBM Plex Mono", monospace';
@@ -171,6 +190,7 @@ export function createStarlightIntelScene({ viewer, flyTo = flyToCoordinate }) {
       const byId = new Map(
         shown.citations.map((citation) => [citation.id, citation]),
       );
+      const place = actions.find((action) => action.type === 'place') ?? shown.place;
       for (const action of actions) {
         if (action.type === 'fly' && byId.has(action.id)) {
           this.focus(action.id);
@@ -178,7 +198,8 @@ export function createStarlightIntelScene({ viewer, flyTo = flyToCoordinate }) {
           return;
         }
         if (action.type === 'frame') {
-          frame(action.ids.map((id) => byId.get(id)).filter(Boolean));
+          const sites = action.ids.map((id) => byId.get(id)).filter(Boolean);
+          frame(nearPlace(sites, place));
           return;
         }
       }

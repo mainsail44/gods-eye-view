@@ -25,6 +25,10 @@ services:
       # when the intel profile is not running: the proxy answers 503 with a
       # reason and the map carries on.
       STARLIGHT_INTEL_URL: ${STARLIGHT_INTEL_URL:-http://starlight-intel:8080}
+      # Quantum-derived key for the intel link (scripts/qrypt-intel-key.sh).
+      QRYPT_KEY_DIR: /run/qrypt
+    volumes:
+      - ./qrypt-key:/run/qrypt:ro,z
     ports:
       - '4173:4173'
     networks:
@@ -74,9 +78,12 @@ services:
       # The embedding model behind the vector index; empty disables vectors.
       # The stub runtime embeds deterministically under any name.
       INTEL_EMBED_MODEL: ${INTEL_EMBED_MODEL:-starlight-stub-embed}
+      INTEL_QRYPT_KEY_DIR: /run/qrypt
     volumes:
       # The vector index, embedded once per corpus and model and reused.
       - intel-cache:/app/cache
+      # The intel side of the quantum-derived link key (gen_sync output).
+      - ./qrypt-key:/run/qrypt:ro,z
     networks:
       - intel
     restart: unless-stopped

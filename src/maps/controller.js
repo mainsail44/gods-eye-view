@@ -170,6 +170,24 @@ export class MapSourceController {
     // Terrain is intentionally untouched while the globe is hidden.
   }
 
+  /**
+   * Swap a source's tileset for a freshly created one (Google session
+   * renewal). The stale tileset is hidden, not destroyed: other modules may
+   * still hold a reference to it.
+   */
+  replaceTileset(stackId, fresh) {
+    const source = this._sources.get(stackId);
+    if (!source || !fresh) return false;
+    const stale = source.tileset;
+    fresh.show = false;
+    this.viewer.scene.primitives.add(fresh);
+    source.tileset = fresh;
+    if (stale) stale.show = false;
+    if (this.getState?.().activeId === stackId || this._activeId === stackId)
+      this._showTileset(fresh);
+    return true;
+  }
+
   _showTileset(active) {
     for (const source of this._sources.values())
       if (source.tileset) source.tileset.show = source.tileset === active;

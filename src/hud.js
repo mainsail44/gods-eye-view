@@ -200,6 +200,10 @@ export class IntelHUD {
         <div class="hud-content" style="text-align:right">
           <div class="hud-rec"><span id="hud-rec-dot">●</span> REC  <span id="hud-timestamp">2026-01-01 00:00:00Z</span></div>
           <div class="hud-orbital">ORB: ${this._orbitNum}  PASS: DESC-${this._passNum}</div>
+          <div class="hud-qkey" id="hud-qkey" data-state="unknown" title="Starlight Intel link: both ends derive the key from Qrypt quantum entropy (BLAST); the key never crosses the network">
+            <svg class="hud-qkey-lock" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path class="hud-qkey-shackle" d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><rect x="3" y="7" width="10" height="7.5" rx="1.6" fill="currentColor"/></svg>
+            <span class="hud-qkey-lines"><span id="hud-qkey-text">QRYPT QUANTUM KEY · CHECKING</span><span id="hud-qkey-sub"></span><span id="hud-qkey-ent"></span><span id="hud-qkey-ttl"></span></span>
+          </div>
         </div>
         <div class="hud-bracket">┐</div>
       </div>
@@ -270,6 +274,105 @@ export class IntelHUD {
       if (!this._visible) return;
       void this._updateSummary(true);
     }, HUD_SUMMARY_INTERVAL_MS);
+
+    // Quantum link key state — every 10 s from the intel health report; the
+    // next-rotation countdown ticks once a second in between.
+    void this._updateQuantumKey();
+    this._qkeyInterval = setInterval(() => {
+      if (!this._visible) return;
+      void this._updateQuantumKey();
+    }, 10_000);
+    this._qkeyTickInterval = setInterval(() => {
+      if (!this._visible || this._entropyDraw) return;
+      this._paintQuantumKey();
+    }, 1000);
+  }
+
+  /**
+   * Show whether the Starlight Intel link is secured by the Qrypt-derived
+   * key: both ends hold the same fingerprint (secure), differ (mismatch), or
+   * no key is mounted / the service is down (unsecured). A new fingerprint
+   * plays the entropy draw: each source that was sampled, with its latency.
+   */
+  async _updateQuantumKey() {
+    const el = document.getElementById('hud-qkey');
+    if (!el) return;
+    let q = null;
+    try {
+      const res = await fetch('/api/intel/health', { cache: 'no-store' });
+      const health = res.ok ? await res.json() : null;
+      q = health?.qrypt ?? null;
+    } catch {
+      q = null;
+    }
+    const state = q?.status === 'secure' ? 'secure' : q?.status === 'mismatch' ? 'mismatch' : 'unsecured';
+    const previous = this._qkey;
+    this._qkey = { state, q, seenAt: Date.now() };
+    el.dataset.state = state;
+    if (state === 'secure' && previous?.state === 'secure' && previous.q?.fingerprint && previous.q.fingerprint !== q.fingerprint)
+      this._playEntropyDraw(q);
+    this._paintQuantumKey();
+  }
+
+  /** Paint the three HUD lines from the last health report; the countdown ticks locally. */
+  _paintQuantumKey() {
+    const text = document.getElementById('hud-qkey-text');
+    const sub = document.getElementById('hud-qkey-sub');
+    const ent = document.getElementById('hud-qkey-ent');
+    if (!text || !sub || !ent) return;
+    const { state, q } = this._qkey ?? { state: 'unsecured', q: null };
+    if (state === 'secure') {
+      const fp = String(q.fingerprint || '').slice(0, 8).toUpperCase();
+      const at = String(q.rotated_at || '').replace('T', ' ').slice(11, 16);
+      text.textContent = 'QRYPT QUANTUM KEY · SECURE';
+      sub.textContent = `INTEL LINK · ${q.cipher || 'AES-256-GCM'} · FP ${fp}${at ? ` · ROT ${at}Z` : ''}`;
+      if (this._entropyDraw) return; // the draw animation owns the third line
+      const next = Date.parse(q.next_rotation_at || '');
+      let countdown = '';
+      if (Number.isFinite(next)) {
+        const left = Math.round((next - Date.now()) / 1000);
+        countdown = left > 0 ? ` · NEXT ${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}` : ' · ROTATING';
+      }
+      const sampled = Array.isArray(q.sources_detail) ? q.sources_detail.length : 0;
+      ent.textContent = `ENTROPY ${sampled || q.sources || 0}/${q.sources || 0} QDEA · ${String(q.region || 'AWS-EASTUS').toUpperCase()}`;
+      const ttl = document.getElementById('hud-qkey-ttl');
+      if (ttl) ttl.textContent = `${q.key_bits || 256} BIT · TTL ${q.ttl || 0}S${countdown}`;
+    } else if (state === 'mismatch') {
+      text.textContent = 'QRYPT QUANTUM KEY · MISMATCH';
+      sub.textContent = 'INTEL LINK · KEYS DIFFER · CIPHER OFF';
+      ent.textContent = '';
+      const ttl = document.getElementById('hud-qkey-ttl'); if (ttl) ttl.textContent = '';
+    } else {
+      text.textContent = 'QRYPT QUANTUM KEY · UNSECURED';
+      sub.textContent = 'INTEL LINK · NO KEY';
+      ent.textContent = '';
+      const ttl = document.getElementById('hud-qkey-ttl'); if (ttl) ttl.textContent = '';
+    }
+  }
+
+  /** Flash each entropy source that was sampled for the new key, then settle. */
+  _playEntropyDraw(q) {
+    const ent = document.getElementById('hud-qkey-ent');
+    const el = document.getElementById('hud-qkey');
+    const sources = Array.isArray(q.sources_detail) && q.sources_detail.length ? q.sources_detail : [];
+    if (!ent || !el || !sources.length) return;
+    clearInterval(this._entropyDraw);
+    el.dataset.drawing = 'true';
+    let i = 0;
+    const step = () => {
+      if (i >= sources.length) {
+        clearInterval(this._entropyDraw);
+        this._entropyDraw = null;
+        delete el.dataset.drawing;
+        this._paintQuantumKey();
+        return;
+      }
+      const s = sources[i];
+      ent.textContent = `SAMPLING ${String(s.host || '').replace('-aws-eastus.qrypt.com', '').toUpperCase()} · ${s.ms} MS · ${i + 1}/${sources.length} · NEW KEY`;
+      i += 1;
+    };
+    step();
+    this._entropyDraw = setInterval(step, 380);
   }
 
   /**
@@ -916,6 +1019,9 @@ export class IntelHUD {
     clearInterval(this._timestampInterval);
     clearInterval(this._summaryInterval);
     clearInterval(this._summaryTypingInterval);
+    clearInterval(this._qkeyInterval);
+    clearInterval(this._qkeyTickInterval);
+    clearInterval(this._entropyDraw);
     this.viewer.camera.moveEnd.removeEventListener(this._onCameraMoveEnd);
     this._dataManagerUnsubscribe?.();
     this._summaryRequest?.abort();

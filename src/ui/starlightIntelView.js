@@ -135,6 +135,36 @@ export function createStarlightIntelView({
   const readingNode = element.querySelector('[data-intel-reading]');
   const traceList = element.querySelector('[data-intel-trace]');
   const documentRef = element.ownerDocument;
+
+  // Minimize folds the panel to its title row; the choice is remembered per
+  // browser so a presenter's layout survives a reload.
+  const MINIMIZED_KEY = 'starlight-intel:minimized';
+  const minimizeButton = element.querySelector('[data-intel-minimize]');
+  const setMinimized = (minimized) => {
+    element.classList.toggle('is-minimized', minimized);
+    if (minimizeButton) {
+      minimizeButton.setAttribute('aria-expanded', String(!minimized));
+      minimizeButton.title = minimized ? 'Expand' : 'Minimize';
+      minimizeButton.textContent = minimized ? '+' : '\u2013';
+    }
+    try {
+      documentRef.defaultView?.localStorage?.setItem(MINIMIZED_KEY, minimized ? '1' : '0');
+    } catch {
+      /* storage is a convenience */
+    }
+  };
+  if (minimizeButton) {
+    let remembered = false;
+    try {
+      remembered = documentRef.defaultView?.localStorage?.getItem(MINIMIZED_KEY) === '1';
+    } catch {
+      /* ignore */
+    }
+    setMinimized(remembered);
+    minimizeButton.addEventListener('click', () =>
+      setMinimized(!element.classList.contains('is-minimized')),
+    );
+  }
   // The panel repaints on every health poll (5 s). The answer object only
   // changes when a new answer lands, so rebuild the citation buttons only
   // then: replacing them on every poll drops a click that straddles the
@@ -198,12 +228,58 @@ export function createStarlightIntelView({
     readingNode.textContent = line;
   };
 
+  // Quantum link key line and its fold-out entropy detail.
+  const qkeyButton = element.querySelector('[data-intel-qkey]');
+  const qkeyDetail = element.querySelector('[data-intel-qkey-detail]');
+  let qkeyOpen = false;
+  if (qkeyButton && qkeyDetail)
+    qkeyButton.addEventListener('click', () => {
+      qkeyOpen = !qkeyOpen;
+      qkeyButton.setAttribute('aria-expanded', String(qkeyOpen));
+      qkeyDetail.hidden = !qkeyOpen;
+    });
+  const paintQkey = (health) => {
+    if (!qkeyButton || !qkeyDetail) return;
+    const secure = health?.qryptStatus === 'secure';
+    const mismatch = health?.qryptStatus === 'mismatch';
+    qkeyButton.hidden = !(secure || mismatch);
+    qkeyButton.dataset.state = secure ? 'secure' : 'mismatch';
+    qkeyButton.textContent = secure
+      ? `\u{1F512} Qrypt quantum key ${health.qryptFingerprint.slice(0, 8)} \u00b7 ${health.qryptCipher || 'AES-256-GCM'} \u00b7 ${qkeyOpen ? 'less' : 'details'}`
+      : '\u{1F513} Qrypt quantum key MISMATCH';
+    if (!secure) {
+      qkeyDetail.hidden = true;
+      return;
+    }
+    const age = health.qryptRotatedAt ? Math.max(0, Math.round((Date.now() - Date.parse(health.qryptRotatedAt)) / 1000)) : null;
+    const rows = [
+      ['Protocol', health.qryptProtocol || 'Qrypt BLAST'],
+      ['Cipher', `${health.qryptCipher || 'AES-256-GCM'}, ${health.qryptKeyBits || 256}-bit key, fresh nonce per message`],
+      ['Entropy', `${health.qryptSources} QDEA sources, ${health.qryptRegion || 'aws-eastus'}`],
+      ['Sampled', health.qryptSourcesDetail.map((s) => `${s.host.replace('-aws-eastus.qrypt.com', '')} ${s.ms} ms`).join(' \u00b7 ') || '\u2014'],
+      ['Derivation', `app gen_init_otp ${health.qryptInitMs} ms \u00b7 intel gen_sync ${health.qryptSyncMs} ms`],
+      ['Metadata', `${health.qryptMetadataBytes} bytes crossed the link; the key never did`],
+      ['Key age', age === null ? '\u2014' : `${age} s, TTL ${health.qryptTtl} s, next rotation ${health.qryptNextRotationAt.replace('T', ' ').slice(11, 16)}Z`],
+      ['SDK', health.qryptSdk || '\u2014'],
+    ];
+    qkeyDetail.replaceChildren(
+      ...rows.flatMap(([term, value]) => {
+        const dt = documentRef.createElement('dt');
+        dt.textContent = term;
+        const dd = documentRef.createElement('dd');
+        dd.textContent = value;
+        return [dt, dd];
+      }),
+    );
+  };
+
   return {
     /** Paint one panel state; hidden whenever the component is toggled off. */
     render({ enabled, health, answer, status }) {
       element.hidden = !enabled;
       statusNode.textContent = status;
       metaNode.textContent = describeIntelHealth(health);
+      paintQkey(health);
       answerNode.textContent = answer.answer;
       if (answer === paintedAnswer) return;
       paintedAnswer = answer;

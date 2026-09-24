@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { intelUrl } from '../../src/sources/intelEndpoint.js';
+import { CIPHER, isEnvelope, open as openEnvelope, seal } from '../../services/intel/src/qryptCipher.js';
 import {
   INTEL_HEALTH_PATH,
   INTEL_QUERY_PATH,
@@ -55,6 +58,54 @@ const readBody = (req) =>
 // STARLIGHT_INTEL_TIMEOUT_MS when a runtime is faster or slower than that.
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+// The app side of the quantum-derived link key: 32 bytes from Qrypt BLAST
+// (gen_init_otp), written by scripts/qrypt-intel-key.sh and mounted read-only.
+// Read per call so a rotation needs no restart. Absent key = unsecured link.
+const QRYPT_KEY_DIR = process.env.QRYPT_KEY_DIR || '';
+export function readQryptAppKey(dir = QRYPT_KEY_DIR) {
+  if (!dir) return null;
+  try {
+    const key = readFileSync(join(dir, 'app.key'), 'utf8').trim();
+    let status = {};
+    try {
+      status = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8'));
+    } catch {
+      /* status is informational */
+    }
+    return key ? { key, status } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fold the link-key state into the intel service's health report. */
+export function describeQryptLink(health, app) {
+  const remote = health?.qrypt && typeof health.qrypt === 'object' ? health.qrypt : {};
+  const st = app?.status || {};
+  const appFp = st.fingerprint || '';
+  const intelFp = remote.fingerprint || '';
+  const status = !app || !intelFp ? 'unsecured' : appFp && appFp === intelFp ? 'secure' : 'mismatch';
+  return {
+    ...remote,
+    status,
+    app_fingerprint: appFp,
+    cipher: status === 'secure' ? remote.cipher || CIPHER : 'none',
+    rotated_at: st.rotated_at || remote.rotated_at || '',
+    next_rotation_at: st.next_rotation_at || '',
+    origin: st.origin || remote.origin || '',
+    region: st.region || '',
+    sources: st.sources ?? remote.sources ?? 0,
+    sources_detail: Array.isArray(st.sources_detail) ? st.sources_detail.slice(0, 16) : [],
+    key_bits: st.key_bits || 256,
+    metadata_bytes: st.metadata_bytes || 0,
+    ttl: st.ttl || 0,
+    init_ms: st.init_ms || 0,
+    sync_ms: st.sync_ms || 0,
+    sdk: st.sdk || remote.sdk || '',
+    protocol: st.protocol || '',
+  };
+}
+
 /** Positive, finite milliseconds from the environment, or the default. */
 function configuredTimeoutMs(value = process.env.STARLIGHT_INTEL_TIMEOUT_MS) {
   const parsed = Number(value);
@@ -90,6 +141,10 @@ export function createSovereignMiddleware({
         response = await fetchImpl(intelUrl(baseUrl, INTEL_HEALTH_PATH), {
           signal: controller.signal,
         });
+        const health = await response.json();
+        if (health && typeof health === 'object')
+          health.qrypt = describeQryptLink(health, readQryptAppKey());
+        return send(res, response.status ?? 200, health);
       } else {
         const body = await readBody(req);
         if (body === BODY_TOO_LARGE)
@@ -100,12 +155,22 @@ export function createSovereignMiddleware({
         } catch {
           return send(res, 400, { error: 'A question is required' });
         }
+        // With a link key the query travels sealed under AES-256-GCM and the
+        // answer comes back the same way; without one it is plain JSON.
+        const app = readQryptAppKey();
         response = await fetchImpl(intelUrl(baseUrl, INTEL_QUERY_PATH), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(app ? seal(payload, app.key) : payload),
           signal: controller.signal,
         });
+        let answer = await response.json();
+        if (isEnvelope(answer)) {
+          answer = app ? openEnvelope(answer, app.key) : null;
+          if (!answer)
+            return send(res, 502, { error: 'Could not open the sealed intel answer' });
+        }
+        return send(res, response.status ?? 200, answer);
       }
       return send(res, response.status ?? 200, await response.json());
     } catch {

@@ -3,8 +3,12 @@
     <div class="starlight-intel-head">
       <span class="starlight-intel-title" id="starlight-intel-name">Starlight Local Intel</span>
       <span class="starlight-intel-status" role="status" aria-live="polite" data-intel-status>Disabled</span>
+      <button type="button" class="starlight-intel-minimize" data-intel-minimize aria-expanded="true" aria-controls="starlight-intel" title="Minimize">&#8211;</button>
     </div>
     <p class="starlight-intel-meta" data-intel-meta></p>
+    <!-- Quantum link key: click the padlock line for the entropy details. -->
+    <button type="button" class="starlight-intel-qkey" data-intel-qkey aria-expanded="false" hidden></button>
+    <dl class="starlight-intel-qkey-detail" data-intel-qkey-detail hidden></dl>
     <form class="starlight-intel-ask" data-intel-form>
       <input
         id="starlight-intel-question"

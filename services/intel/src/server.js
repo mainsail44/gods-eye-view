@@ -1,4 +1,29 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { corpusChecksum, selectRetrievalMode } from './corpus.js';
+import { CIPHER, isEnvelope, open as openEnvelope, seal } from './qryptCipher.js';
+
+// The intel side of the quantum-derived link key: the same 32 bytes the app
+// holds, re-derived here by Qrypt BLAST gen_sync from non-secret metadata
+// (scripts/qrypt-intel-key.sh). Read per call so a rotation needs no restart.
+const QRYPT_KEY_DIR = process.env.INTEL_QRYPT_KEY_DIR || '';
+export function readQryptIntelKey(dir = QRYPT_KEY_DIR) {
+  if (!dir) return null;
+  try {
+    const key = readFileSync(join(dir, 'intel.key'), 'utf8').trim();
+    let status = {};
+    try {
+      status = JSON.parse(readFileSync(join(dir, 'status.json'), 'utf8'));
+    } catch {
+      /* informational */
+    }
+    return key ? { key, status } : null;
+  } catch {
+    return null;
+  }
+}
+
+
 import { EMPTY_READING, isEmptyReading } from './reader.js';
 import { indexCorpus, retrieveHybrid } from './retrieval.js';
 
@@ -41,9 +66,10 @@ const readBody = (req) =>
     });
   });
 
-const send = (res, status, payload) => {
+const sendPlain = (res, status, payload, headers = {}) => {
   res.statusCode = status;
   res.setHeader('Content-Type', 'application/json');
+  for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
   res.end(JSON.stringify(payload));
 };
 
@@ -155,10 +181,27 @@ export function createIntelHandler({
 
   return async function handle(req, res) {
     const path = String(req.url || '').split('?')[0];
+    // Replies on a keyed link go back inside the same AES-256-GCM envelope.
+    const send = (target, status, payload) =>
+      target.__qryptKey
+        ? sendPlain(target, status, seal(payload, target.__qryptKey), { 'X-Qrypt-Cipher': CIPHER })
+        : sendPlain(target, status, payload);
 
     if (req.method === 'GET' && path === '/health') {
       const index = embeddings();
+      const qk = readQryptIntelKey();
       return send(res, 200, {
+        qrypt: qk
+          ? {
+              fingerprint: qk.status.fingerprint || '',
+              rotated_at: qk.status.rotated_at || '',
+              origin: qk.status.origin || '',
+              sources: qk.status.sources ?? 0,
+              sdk: qk.status.sdk || '',
+              cipher: CIPHER,
+              required: true,
+            }
+          : { required: false },
         model,
         runtime,
         egress,
@@ -173,7 +216,16 @@ export function createIntelHandler({
     }
 
     if (req.method === 'POST' && path === '/query') {
-      const body = await readBody(req);
+      const qk = readQryptIntelKey();
+      let body = await readBody(req);
+      if (qk) {
+        // A keyed link only accepts sealed queries; a wrong key cannot open them.
+        const payload = isEnvelope(body) ? openEnvelope(body, qk.key) : null;
+        if (!payload)
+          return send(res, 401, { error: 'Quantum link key missing or mismatched' });
+        body = payload;
+        res.__qryptKey = qk.key;
+      }
       if (body === TOO_LARGE)
         return send(res, 413, { error: 'Request body too large' });
       const question = String(body?.question ?? '').trim();

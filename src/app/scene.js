@@ -8,6 +8,7 @@ import { registerDataCredits } from '../data/dataCredits.js';
 import { configureCreditKeyboardAccess } from '../creditKeyboard.js';
 import { MapStackController } from '../mapStackController.js';
 import { loadPhotorealisticTileset } from '../mapStartup.js';
+import { installTilesetSessionWatchdog } from '../maps/tilesetSessionWatchdog.js';
 import { initLogoGaze } from '../logoGaze.js';
 import {
   uninstallRenderGovernor,
@@ -117,6 +118,21 @@ export async function createApplicationScene({
   await mapStackController.setStack(tileset ? 'photoreal' : 'esri-imagery', {
     silent: true,
   });
+  if (tileset) {
+    defer(
+      installTilesetSessionWatchdog({
+        tileset,
+        recreate: async () =>
+          (await loadPhotorealisticTileset(Cesium, { googleApiKey, cesiumToken }))
+            .tileset,
+        onReplaced: (fresh) => {
+          mapStackController.replaceTileset('photoreal', fresh);
+          if (window.__godsEyeView) window.__godsEyeView.tileset = fresh;
+          viewer.scene.requestRender?.();
+        },
+      }),
+    );
+  }
 
   signal.throwIfAborted();
   return { viewer, tileset, mapStackController, operations };

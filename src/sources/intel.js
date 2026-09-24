@@ -3,6 +3,7 @@ export const INTEL_QUERY_PATH = '/query';
 
 const EGRESS_STATES = new Set(['blocked', 'allowed']);
 const ATTESTATION_STATES = new Set(['verified', 'unverified']);
+const QRYPT_STATES = new Set(['secure', 'mismatch', 'unsecured']);
 const MAX_ANSWER_CHARS = 4000;
 const MAX_CITATIONS = 50;
 const MAX_TRACE_STEPS = 12;
@@ -49,8 +50,31 @@ export function normalizeIntelHealth(raw) {
       : {};
   const egress = text(source.egress, 16);
   const attestation = text(source.attestation, 16);
+  const qrypt =
+    source.qrypt && typeof source.qrypt === 'object' ? source.qrypt : {};
+  const qryptStatus = text(qrypt.status, 16);
   return Object.freeze({
     ok: Boolean(model),
+    qryptStatus: QRYPT_STATES.has(qryptStatus) ? qryptStatus : 'unsecured',
+    qryptFingerprint: text(qrypt.fingerprint, 64),
+    qryptRotatedAt: text(qrypt.rotated_at, 40),
+    qryptOrigin: text(qrypt.origin, 80),
+    qryptSources: number(qrypt.sources, { min: 0 }) ?? 0,
+    qryptSdk: text(qrypt.sdk, 80),
+    qryptCipher: text(qrypt.cipher, 24),
+    qryptNextRotationAt: text(qrypt.next_rotation_at, 40),
+    qryptRegion: text(qrypt.region, 32),
+    qryptKeyBits: number(qrypt.key_bits, { min: 0 }) ?? 0,
+    qryptMetadataBytes: number(qrypt.metadata_bytes, { min: 0 }) ?? 0,
+    qryptTtl: number(qrypt.ttl, { min: 0 }) ?? 0,
+    qryptInitMs: number(qrypt.init_ms, { min: 0 }) ?? 0,
+    qryptSyncMs: number(qrypt.sync_ms, { min: 0 }) ?? 0,
+    qryptProtocol: text(qrypt.protocol, 80),
+    qryptSourcesDetail: Object.freeze(
+      (Array.isArray(qrypt.sources_detail) ? qrypt.sources_detail : [])
+        .slice(0, 16)
+        .map((entry) => Object.freeze({ host: text(entry?.host, 80), ms: number(entry?.ms, { min: 0 }) ?? 0 })),
+    ),
     model,
     runtime,
     corpusVersion: text(corpus.version, 64),
